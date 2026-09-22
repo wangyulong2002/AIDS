@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
 # 项目根：tests/contract/_doc_parser.py → 上溯 2 层
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
@@ -90,10 +91,13 @@ def parse_enum_mappings() -> dict[str, dict[int, tuple[str, str]]]:
     for line in section:
         m = heading_re.match(line)
         if m:
-            current = m.group(1).strip()
+            # typeshed 把 group() 标成 AnyStr | MaybeNone，显式收窄
+            current = cast(str, m.group(1)).strip()
             result[current] = {}
             continue
-        if current is None or not line.strip().startswith("|"):
+        if current is None:
+            continue
+        if not line.strip().startswith("|"):
             continue
         cells = _split_row(line)
         if len(cells) < 3:
@@ -175,10 +179,12 @@ def parse_field_details() -> dict[str, list[str]]:
     for line in section:
         m = heading_re.match(line)
         if m:
-            current = m.group(1).strip()
+            current = cast(str, m.group(1)).strip()
             result[current] = []
             continue
-        if current is None or not line.strip().startswith("|"):
+        if current is None:
+            continue
+        if not line.strip().startswith("|"):
             continue
         cells = _split_row(line)
         if len(cells) < 4:

@@ -9,26 +9,41 @@
 # 核心思想：约束产出（代码能不能过检查），而非约束输入（AI 读没读文档）。
 #
 # -------------------------------------------------------------
-# 修复记录（v2，2026-09-22）
+# 修复记录
 #
-# 首轮 run #1 结果：lint ✅ / contract ❌ / invariants ❌ / typecheck ❌
+# run #1（bb8b99a）：lint ✅ / contract ❌ / invariants ❌ / typecheck ❌
+#   根因：CI 上从未把仓库根放进 Python 导入路径。本地能跑只是因为
+#         cwd 恰好等于仓库根（sys.path[0] 为空串 = cwd）。
+#   修复：全局 PYTHONPATH: ${{ github.workspace }}（v2）
 #
-# 根因（三个 job 共因）：
-#   CI 上从未把仓库根放进 Python 导入路径。本地能跑只是因为
-#   cwd 恰好等于仓库根（`sys.path[0]` 为空串 = cwd），
-#   而 CI 在 `pytest tests/...` 时的 rootdir 推导不可靠，
-#   于是 `import app` 与 `from tests.contract import ...`
-#   直接 ModuleNotFoundError。
+# run #2（974041a）：lint ✅ / invariants ✅ / contract ❌ / typecheck ❌
+#   lint、invariants 已转绿，PYTHONPATH 修复生效。
 #
-# 修复：所有 job 显式设置 `PYTHONPATH: ${{ github.workspace }}`，
-#       并加"自检"步骤先验证导入可用（失败即早停，不浪费后续时间）。
+#   剩余问题 1 —— contract: `Initialize containers` 失败
+#     根因：`--default-time-zone=+00:00` 是 MySQL 服务端参数，
+#           不是 docker flag。GitHub Actions 把 services.<id>.options
+#           的内容原样拼进 `docker create` 命令行
+#           （见 actions/runner DockerCommandManager.cs），
+#           docker 直接报 `unknown flag: --default-time-zone`，
+#           容器根本创建不出来 → Initialize containers 失败。
+#     修复：把 MySQL 参数挪到 `services.<id>.options` 之外的
+#           image command 段（YAML 顶层 `services.mysql.command`），
+#           让 runner 在 IMAGE 之后拼接这些参数。
 #
-# 为什么不用 `pip install -e .`：
+#   剩余问题 2 —— typecheck: pyright 报 16 errors
+#     根因 A（13 个）：`Could not resolve import "pydantic"/"pytest"/"hypothesis"`。
+#           pyright 是 Node 程序，不读 pip 环境的 site-packages，
+#           也不知道 CI 上仓库根在哪，必须显式告知依赖位置。
+#     根因 B（3 个）：真实类型错误 `str | None` 赋给 `str`
+#           （tests/conftest.py、tests/contract/_doc_parser.py）。
+#           已改为窄化后的局部变量，代码本身修复。
+#     修复：CI 用 venv + 生成 pyrightconfig.json，
+#           `extraPaths` 显式指向 venv 的 site-packages。
+#           本地实测 16 → 2 errors，13 个 import 错误全部消除。
+#
+# 为什么不用 pip install -e .：
 #   本项目 hatchling 构建需联网拉构建依赖，多一个失败点。
-#   PYTHONPATH 零依赖且已实测（从外部 cwd 跑，233+68 全绿）。
-#
-# 另修：pyright 原用第三方 action，改为 npm 安装 + 显式 --pythonpath，
-#       并把结果解析为"有 error 才失败"，避免 action 版本行为差异。
+#   PYTHONPATH + extraPaths 零额外依赖。
 # -------------------------------------------------------------
 name: CI
 
@@ -102,12 +117,15 @@ jobs:
           MYSQL_PASSWORD: aids_pass
         ports:
           - 13306:3306
+        # 注意：这里只能放 docker flag。
+        # MySQL 自身的服务端参数（如 --default-time-zone）必须放在 command，
+        # 否则 runner 会原样拼到 `docker create` 里导致 unknown flag。
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
-          --default-time-zone=+00:00
+        command: --default-time-zone=+00:00
 
     env:
       APP_ENV: test
@@ -182,6 +200,10 @@ jobs:
 
   # ---------------------------------------------------------------
   # L2-d 类型检查（标准档：basic）
+  #
+  # 关键：pyright 是 Node 程序，不认识 pip 的 site-packages。
+  #       必须把依赖路径写进 pyrightconfig.json 的 extraPaths，
+  #       否则所有第三方 import 都会报 could not be resolved。
   # ---------------------------------------------------------------
   typecheck:
     name: Typecheck (pyright basic)
@@ -197,6 +219,34 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "pydantic>=2.9" "sqlalchemy>=2.0"
+          pip install "pytest>=8.3" "hypothesis>=6.120"
+
+      - name: 生成 pyright 配置（显式指定依赖路径）
+        run: |
+          python - <<'PY'
+          import json
+          import site
+
+          paths = [p for p in site.getsitepackages() if p]
+          try:
+              paths.append(site.getusersitepackages())
+          except Exception:
+              pass
+
+          cfg = {
+              "include": ["app", "tests"],
+              "exclude": ["**/node_modules", "deploy", "docs"],
+              "pythonVersion": "3.11",
+              "typeCheckingMode": "basic",
+              "reportMissingImports": True,
+              "reportMissingTypeStubs": False,
+              "extraPaths": paths,
+          }
+          with open("pyrightconfig.json", "w", encoding="utf-8") as fh:
+              json.dump(cfg, fh, indent=2, ensure_ascii=False)
+          print("pyrightconfig.json:")
+          print(json.dumps(cfg, indent=2, ensure_ascii=False))
+          PY
 
       - name: 安装 pyright
         run: npm install -g pyright

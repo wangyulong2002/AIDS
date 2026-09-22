@@ -29,7 +29,7 @@ def db_conn() -> Iterator[Any]:
     这样本地开发只跑静态层也能得到有意义的结果。
     """
     url = _database_url()
-    if not url:
+    if url is None:
         pytest.skip("未配置 DATABASE_URL，跳过需要真实 MySQL 的反射测试")
 
     sync_url = _to_sync_url(url)
