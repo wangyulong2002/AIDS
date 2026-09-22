@@ -25,12 +25,20 @@ import pytest
 from tests.contract._doc_parser import (
     DATA_DICTIONARY,
     SCHEMA_SQL,
+    parse_schema_unique_index_columns,
     parse_schema_unique_indexes,
 )
 
 pytestmark = pytest.mark.contract
 
 UNIQUE_INDEXES: dict[str, set[str]] = parse_schema_unique_indexes()
+UNIQUE_INDEX_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = parse_schema_unique_index_columns()
+
+
+def _unique_columns(table: str) -> set[str]:
+    """该表全部 UNIQUE 索引覆盖的列集合。"""
+    return {col for cols in UNIQUE_INDEX_COLUMNS.get(table, {}).values() for col in cols}
+
 
 # ---------------------------------------------------------------------
 # 不变量 §四 中声明"由 DDL 强制"的条目（其余为应用层保证）
@@ -67,7 +75,7 @@ class TestDocInvariantsSection:
 
 
 class TestUniqueIndexesPresent:
-    """DDL 中的 UNIQUE 索引必须真实存在。"""
+    """DDL 中的 UNIQUE 索引必须真实存在，**且建在不变量声明的列上**。"""
 
     @pytest.mark.parametrize(
         "table,column",
@@ -79,10 +87,30 @@ class TestUniqueIndexesPresent:
         keys = UNIQUE_INDEXES[table]
         assert keys, f"{table} 没有任何 UNIQUE KEY（不变量要求列 {column} 唯一）"
 
+    @pytest.mark.parametrize(
+        "table,column",
+        sorted((t, c) for t, c in DDL_ENFORCED_UNIQUE.items()),
+    )
+    def test_unique_index_covers_declared_column(self, table: str, column: str) -> None:
+        """补强：UNIQUE 必须覆盖不变量声明的列，而不只是"存在某个 UNIQUE"。
+
+        为什么原断言不够：只要表上有任意一个 UNIQUE KEY，`assert keys` 就会通过——
+        把 `UNIQUE KEY (idempotent_key)` 误建成 `UNIQUE KEY (id)` 也照样绿，
+        而幂等性完全失效（线上表现为重复扣库存 / 重复发货 / 刷评价）。
+        """
+        assert column in _unique_columns(table), (
+            f"{table} 的 UNIQUE 索引未覆盖 {column}；实际覆盖列：{sorted(_unique_columns(table))}"
+        )
+
     def test_local_message_unique(self) -> None:
-        """#12 本地消息幂等：sys_local_message 必须有 UNIQUE 索引。"""
+        """#12 本地消息幂等：sys_local_message 必须按 (biz_type,biz_no,topic) 唯一。"""
         assert UNIQUE_INDEXES.get("sys_local_message"), (
             "sys_local_message 缺少 UNIQUE 索引（不变量 #12 要求 (biz_type,biz_no,topic) 唯一）"
+        )
+        covered = _unique_columns("sys_local_message")
+        assert covered >= {"biz_type", "biz_no", "topic"}, (
+            "sys_local_message 的 UNIQUE 索引列与不变量 #12 声明不一致；"
+            f"实际覆盖列：{sorted(covered)}"
         )
 
     def test_user_mobile_hash_unique(self) -> None:

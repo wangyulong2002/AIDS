@@ -1,0 +1,26 @@
+# =============================================================
+# 自动生成 —— 请勿手工编辑
+#
+# 单一来源：pyproject.toml 的 [project].dependencies
+# 生成器：  python3 scripts/gen_requirements.py --write
+# 校验：    pre-commit 钩子 requirements-sync + CI consistency job
+#          （手工改本文件 → 门禁立即变红）
+#
+# 三个服务共用同一份运行依赖（T0 约定：全项目依赖这一个来源）。
+# T1 若需按服务裁剪，改 pyproject.toml 的 extra 后重新生成。
+# =============================================================
+
+fastapi>=0.115
+uvicorn[standard]>=0.32
+gunicorn>=23.0
+pydantic>=2.9
+pydantic-settings>=2.6
+sqlalchemy[asyncio]>=2.0.36
+alembic>=1.14
+asyncmy>=0.2.9
+redis>=5.2
+aiokafka>=0.12
+pyjwt[crypto]>=2.10
+cryptography>=44.0
+bcrypt>=4.2
+httpx>=0.27

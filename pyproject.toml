@@ -6,6 +6,9 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
+    # gunicorn + uvicorn worker：deploy/app/*.Dockerfile 的 CMD 依赖它。
+    # 曾经"CMD 里用了、依赖里没声明"——镜像能起来，运行时 executable not found。
+    "gunicorn>=23.0",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "sqlalchemy[asyncio]>=2.0.36",
@@ -15,6 +18,8 @@ dependencies = [
     "aiokafka>=0.12",
     "pyjwt[crypto]>=2.10",
     "cryptography>=44.0",
+    # 密码哈希（替代 passlib，见 docs/项目设计报告.md 附录 A）
+    "bcrypt>=4.2",
     "httpx>=0.27",
 ]
 
@@ -23,6 +28,10 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "hypothesis>=6.120",
+    # 反射层契约测试（C1 requires_mysql）用 tests/conftest.py 的
+    # _to_sync_url() 把 mysql+asyncmy:// 转成 mysql+pymysql://。
+    # 曾经只在 CI 里单独 pip install——本地按 README 装完仍连不上库。
+    "pymysql>=1.1",
     "ruff>=0.8",
     "pyright>=1.1.390",
     "pre-commit>=4.0",
@@ -96,3 +105,8 @@ pythonVersion = "3.11"
 typeCheckingMode = "basic"
 reportMissingImports = true
 reportMissingTypeStubs = false
+# 类型检查必须用仓库自己的 venv：tests/ 里 import pytest / hypothesis，
+# 若 pyright 解析到系统解释器（没装这些包）会报 22 处 reportMissingImports
+# ——"类型检查失败"变成"环境没配好"，真假问题混在一起。
+venvPath = "."
+venv = ".venv"

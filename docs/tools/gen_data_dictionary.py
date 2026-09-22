@@ -302,10 +302,20 @@ def check_versions_matrix(r: Reporter) -> None:
 
 
 JAVA_RE = re.compile(r"\bjava\b|spring|mybatis|jvm|maven|mvnw|pom\.xml|actuator|nacos|flyway", re.I)
-ALLOW = ("v1.3", "v1.2", "替代", "移除", "已删除", "归档", "去 java", "历史记录", "本表保留",
-         "alembic", "flyway→", "flyway →", "jvm 指标", "actuator/health` →", "nacos_auth_token",
+
+# 允许出现的"已注记"信号：**必须是语义词或版本号，不得是纯标点**。
+#
+# 历史教训：本元组曾含 `"→"`，而判断是"整行 in"，于是**任何带箭头的行**
+# 都整行豁免（如"… 的配置由 `xxx` → `yyy` 提供"）——去 Java 残留检查
+# 退化成"自愿声明"。凡是想豁免，必须写出"替代/移除/去 xxx"这类词，
+# 或带上版本号（v1.1/v1.2/v1.3）说明这是沿革对照。
+ALLOW = ("v1.1", "v1.2", "v1.3", "替代", "移除", "已删除", "归档", "去 java", "历史记录",
+         "本表保留", "沿革", "alembic", "flyway→", "flyway →", "jvm 指标",
+         "actuator/health` →", "nacos_auth_token",
          "application/javascript", "text/javascript", "无 nacos", "见附录", "该组件",
-         "改为", "→", "去 nacos", "已随", "不再")
+         "改为", "去 nacos", "已随", "不再",
+         # 检查自身的名字（"Java 残留"这是断言名，不是技术栈引用）
+         "java 残留", "旧技术栈")
 
 # 这些章节按设计就是历史/归档/对照区，整段豁免
 ARCHIVE_HEAD = ("附录", "历史实测", "归档", "修订", "沿革", "与 v1.1 的差异", "差异")

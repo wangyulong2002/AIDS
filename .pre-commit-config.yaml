@@ -71,3 +71,25 @@ repos:
         language: system
         files: ^app/.*\.py$
         pass_filenames: true
+
+  # ---- 文档一致性门禁（TASKS DEP-05：CI 的第一步 + 一条 pre-commit 钩子）----
+  - repo: local
+    hooks:
+      - id: docs-consistency
+        name: "文档一致性门禁（表/字段/枚举/服务数/任务数/跨文档常量/旧技术栈残留）"
+        # 纯标准库实现（只用 argparse/re/pathlib），因此不需要 venv 依赖，
+        # 也不会因为环境切换而失效——这是它能当"第一道闸"的前提。
+        entry: python3 docs/tools/gen_data_dictionary.py --check
+        language: system
+        pass_filenames: false
+        # 改动这些路径时才跑（脚本扫描面即 docs/** + deploy/** + 根级清单）
+        files: ^(docs/.*|deploy/.*|README\.md|pyproject\.toml|\.gitignore)$
+
+      - id: requirements-sync
+        name: "依赖清单一致性（aids-*/requirements.txt 必须由 pyproject.toml 生成）"
+        # 依赖只有 pyproject.toml 一处来源；三份清单是派生物，
+        # 手改任何一份都会在这里被拦下。
+        entry: python3 scripts/gen_requirements.py --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|aids-[a-z]+/requirements\.txt|scripts/gen_requirements\.py)$

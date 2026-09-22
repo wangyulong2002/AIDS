@@ -3,48 +3,11 @@
 #
 # 设计见 docs/工程化门禁方案.md：
 #   L1 pre-commit（本地，< 5s）—— 见 .pre-commit-config.yaml
-#   L2 PR（本文件 lint / contract / invariants / typecheck，< 5min）
+#   L2 PR（本文件 lint / contract / typecheck，< 5min）
 #   L3 merge 到 main（smoke，< 15min）
 #
 # 核心思想：约束产出（代码能不能过检查），而非约束输入（AI 读没读文档）。
-#
-# -------------------------------------------------------------
-# 修复记录
-#
-# run #1（bb8b99a）：lint ✅ / contract ❌ / invariants ❌ / typecheck ❌
-#   根因：CI 上从未把仓库根放进 Python 导入路径。本地能跑只是因为
-#         cwd 恰好等于仓库根（sys.path[0] 为空串 = cwd）。
-#   修复：全局 PYTHONPATH: ${{ github.workspace }}（v2）
-#
-# run #2（974041a）：lint ✅ / invariants ✅ / contract ❌ / typecheck ❌
-#   lint、invariants 已转绿，PYTHONPATH 修复生效。
-#
-#   剩余问题 1 —— contract: `Initialize containers` 失败
-#     根因：`--default-time-zone=+00:00` 是 MySQL 服务端参数，
-#           不是 docker flag。GitHub Actions 把 services.<id>.options
-#           的内容原样拼进 `docker create` 命令行
-#           （见 actions/runner DockerCommandManager.cs），
-#           docker 直接报 `unknown flag: --default-time-zone`，
-#           容器根本创建不出来 → Initialize containers 失败。
-#     修复：把 MySQL 参数挪到 `services.<id>.options` 之外的
-#           image command 段（YAML 顶层 `services.mysql.command`），
-#           让 runner 在 IMAGE 之后拼接这些参数。
-#
-#   剩余问题 2 —— typecheck: pyright 报 16 errors
-#     根因 A（13 个）：`Could not resolve import "pydantic"/"pytest"/"hypothesis"`。
-#           pyright 是 Node 程序，不读 pip 环境的 site-packages，
-#           也不知道 CI 上仓库根在哪，必须显式告知依赖位置。
-#     根因 B（3 个）：真实类型错误 `str | None` 赋给 `str`
-#           （tests/conftest.py、tests/contract/_doc_parser.py）。
-#           已改为窄化后的局部变量，代码本身修复。
-#     修复：CI 用 venv + 生成 pyrightconfig.json，
-#           `extraPaths` 显式指向 venv 的 site-packages。
-#           本地实测 16 → 2 errors，13 个 import 错误全部消除。
-#
-# 为什么不用 pip install -e .：
-#   本项目 hatchling 构建需联网拉构建依赖，多一个失败点。
-#   PYTHONPATH + extraPaths 零额外依赖。
-# -------------------------------------------------------------
+# =============================================================
 name: CI
 
 on:
@@ -60,10 +23,35 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
-  # 关键：让仓库根进入导入路径，`import app` / `tests.*` 才可用
-  PYTHONPATH: ${{ github.workspace }}
 
 jobs:
+  # ---------------------------------------------------------------
+  # L2-0 文档一致性门禁（TASKS DEP-05：必须是 CI 的**第一步**）
+  #
+  # 为什么排在 lint 之前：它拦的是"文档与代码已经互相矛盾"这类
+  # 结构性漂移（表数/字段数/枚举组数/服务数/任务数/跨文档常量），
+  # 一旦漂移，后面的测试即使全绿也没有意义。
+  #
+  # 纯标准库实现（argparse/re/pathlib），无需安装任何依赖——
+  # 因此它不会因为依赖装不上而被跳过。历史教训：本脚本曾经**不在任何
+  # 自动化里**，33 项检查只有在人记得手敲命令时才跑。
+  # ---------------------------------------------------------------
+  docs:
+    name: Consistency (文档 33 项 + 依赖清单)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 文档一致性门禁
+        run: python3 docs/tools/gen_data_dictionary.py --check -v
+
+      - name: 依赖清单一致性（aids-*/requirements.txt ← pyproject.toml）
+        run: python3 scripts/gen_requirements.py --check
+
   # ---------------------------------------------------------------
   # L2-a 代码风格与静态检查
   # ---------------------------------------------------------------
@@ -78,18 +66,15 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          pip install "ruff>=0.8" "pydantic>=2.9"
+        # 扫描器只用标准库（ast/re/pathlib），ruff 是唯一需要安装的——
+        # 刻意保持"零项目依赖"，这样"装不上依赖"永远不是本 job 失败的原因。
+        run: pip install "ruff>=0.8"
 
       - name: ruff format 检查
         run: ruff format --check app tests
 
       - name: ruff lint
         run: ruff check app tests
-
-      - name: 自检（确认 tests 包可导入）
-        run: python -c "import tests.contract._doc_parser as p; print('parser ok:', p.SCHEMA_SQL.name)"
 
       - name: C4 错误码扫描（禁止硬编码错误码）
         run: python -m tests.contract.scan_error_codes app
@@ -117,15 +102,12 @@ jobs:
           MYSQL_PASSWORD: aids_pass
         ports:
           - 13306:3306
-        # 注意：这里只能放 docker flag。
-        # MySQL 自身的服务端参数（如 --default-time-zone）必须放在 command，
-        # 否则 runner 会原样拼到 `docker create` 里导致 unknown flag。
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
-        command: --default-time-zone=+00:00
+          --default-time-zone=+00:00
 
     env:
       APP_ENV: test
@@ -139,30 +121,15 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          pip install "pytest>=8.3" "pydantic>=2.9" "hypothesis>=6.120"
-          pip install "sqlalchemy>=2.0" "pymysql>=1.1"
-
-      - name: 自检（确认 app 与 tests 均可导入）
-        run: |
-          python -c "import app; print('app ok:', app.__file__)"
-          python -c "import tests.contract._doc_parser as p; print('parser ok:', p.SCHEMA_SQL.exists())"
-
-      - name: 等待 MySQL 就绪
-        run: |
-          for i in $(seq 1 30); do
-            if mysqladmin ping -h 127.0.0.1 -P 13306 -uaids -paids_pass --silent 2>/dev/null; then
-              echo "MySQL 就绪"; exit 0
-            fi
-            echo "等待 MySQL... ($i)"; sleep 2
-          done
-          echo "::error::MySQL 未在 60s 内就绪"; exit 1
+        # 依赖清单只有 pyproject.toml 一处（含 pymysql —— 反射层测试要用它）。
+        # 不在这里另写一份包名列表，避免"CI 装的和本地装的不一样"。
+        run: pip install -e ".[dev]"
 
       - name: 载入 DDL（真实建表）
         run: |
           mysql -h 127.0.0.1 -P 13306 -uaids -paids_pass aids_shop_test \
             < docs/sql/schema.sql
+        continue-on-error: false
 
       - name: C1/C2/C4/C7/C8 契约测试（静态层）
         run: pytest tests/contract -q -m contract
@@ -186,24 +153,16 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          pip install "pytest>=8.3" "pydantic>=2.9" "hypothesis>=6.120"
+        run: pip install -e ".[dev]"
 
-      - name: 自检（确认 app 与 tests 均可导入）
-        run: |
-          python -c "import app; print('app ok')"
-          python -c "import tests.invariants; print('tests.invariants ok')"
-
-      - name: 库存/幂等/退款/优惠券不变量（含启动断言 S1）
+      - name: 库存/幂等/退款/优惠券不变量
         run: pytest tests/invariants -q -m invariant
+
+      - name: 启动断言（S1 结构性防御）
+        run: pytest tests/invariants/test_startup_assertions.py -q
 
   # ---------------------------------------------------------------
   # L2-d 类型检查（标准档：basic）
-  #
-  # 关键：pyright 是 Node 程序，不认识 pip 的 site-packages。
-  #       必须把依赖路径写进 pyrightconfig.json 的 extraPaths，
-  #       否则所有第三方 import 都会报 could not be resolved。
   # ---------------------------------------------------------------
   typecheck:
     name: Typecheck (pyright basic)
@@ -215,85 +174,31 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: 安装依赖
+      - name: 准备类型检查环境（与本地命令完全一致）
+        # pyproject.toml 里配了 venvPath="." / venv=".venv"，所以必须真的存在 .venv；
+        # 同时必须装 [dev]——pyright 要解析 tests/ 里的 pytest / hypothesis 导入，
+        # 只装 pydantic + sqlalchemy 会得到 22 处 reportMissingImports
+        #（"环境没装"伪装成"类型错误"，真假问题混在一起）。
         run: |
-          python -m pip install --upgrade pip
-          pip install "pydantic>=2.9" "sqlalchemy>=2.0"
-          pip install "pytest>=8.3" "hypothesis>=6.120"
+          python -m venv .venv
+          .venv/bin/pip install -e ".[dev]"
 
-      - name: 生成 pyright 配置（显式指定依赖路径）
-        run: |
-          python - <<'PY'
-          import json
-          import site
-
-          paths = [p for p in site.getsitepackages() if p]
-          try:
-              paths.append(site.getusersitepackages())
-          except Exception:
-              pass
-
-          cfg = {
-              "include": ["app", "tests"],
-              "exclude": ["**/node_modules", "deploy", "docs"],
-              "pythonVersion": "3.11",
-              "typeCheckingMode": "basic",
-              "reportMissingImports": True,
-              "reportMissingTypeStubs": False,
-              "extraPaths": paths,
-          }
-          with open("pyrightconfig.json", "w", encoding="utf-8") as fh:
-              json.dump(cfg, fh, indent=2, ensure_ascii=False)
-          print("pyrightconfig.json:")
-          print(json.dumps(cfg, indent=2, ensure_ascii=False))
-          PY
-
-      - name: 安装 pyright
-        run: npm install -g pyright
-
-      - name: pyright 检查（解析结果，有 error 才失败）
-        run: |
-          pyright --outputjson > pyright.json || true
-          python - <<'PY'
-          import json
-          import sys
-
-          try:
-              data = json.load(open("pyright.json", encoding="utf-8"))
-          except Exception as exc:
-              print("pyright 未产出可解析结果:", exc)
-              sys.exit(1)
-
-          summary = data.get("summary", {})
-          print("pyright summary:", summary)
-
-          errors = [
-              d for d in data.get("generalDiagnostics", [])
-              if d.get("severity") == "error"
-          ]
-          for diag in errors:
-              path = diag.get("file", "")
-              line = diag.get("range", {}).get("start", {}).get("line", 0) + 1
-              print(f"  ERROR {path}:{line} {diag.get('message')}")
-
-          if errors:
-              print(f"::error::pyright 发现 {len(errors)} 个类型错误")
-              sys.exit(1)
-
-          print("pyright 无类型错误")
-          PY
+      - name: pyright（basic 档）
+        # 用仓库自己的 pyright（pyproject [dev] 已声明版本），
+        # 而不是第三方 action——保证"CI 跑的命令"与"本地跑的命令"逐字相同。
+        run: .venv/bin/pyright
 
   # ---------------------------------------------------------------
-  # L3 冒烟：仅 main 分支
+  # L3 冒烟：仅 main 分支，起 compose 最小档跑关键链路
   #
-  # 当前 0 业务代码，暂只校验 compose 可解析。
-  # T1 起替换为真实链路：拉起最小档 → 登录 → 下单 → 支付回调。
+  # 当前 0 业务代码，暂以占位实现（只验证 compose 可拉起）。
+  # T1 起替换为真实链路：登录 → 下单 → 支付回调。
   # ---------------------------------------------------------------
   smoke:
     name: Smoke (compose 最小档)
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    needs: [lint, contract, invariants, typecheck]
+    needs: [lint, contract, invariants]
     steps:
       - uses: actions/checkout@v4
 
@@ -311,14 +216,16 @@ jobs:
   gate:
     name: 门禁汇总
     if: always()
-    needs: [lint, contract, invariants, typecheck]
+    needs: [docs, lint, contract, invariants, typecheck]
     runs-on: ubuntu-latest
     steps:
       - name: 检查所有门禁任务
         run: |
           results='${{ toJSON(needs) }}'
           echo "$results"
-          if echo "$results" | grep -qE '"(failure|cancelled)"'; then
+          # 覆盖 failure/cancelled/timed_out/startup_failure：
+          # 只匹配前两种会让"超时"与"启动失败"静默放行。
+          if echo "$results" | grep -qE '"(failure|cancelled|timed_out|startup_failure)"'; then
             echo "::error::门禁未通过，禁止合并。"
             exit 1
           fi

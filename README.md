@@ -24,9 +24,11 @@
 ## 快速开始
 
 ```bash
-# 1. Python 环境
+# 1. Python 环境（基准解释器 3.11，与 pyright/pre-commit 的固定版本一致）
 python3.11 -m venv .venv
 .venv/bin/pip install -e ".[dev]"      # Windows: .venv\Scripts\pip
+# 注意：venv 不入库。Windows 上创建的 venv 在 Linux/WSL 里是废的
+#（只有 Include/ Lib/ Scripts/，没有 bin/），换系统须重建。
 
 # 2. 本地配置
 cp .env.example .env                    # 按需修改
@@ -75,8 +77,12 @@ AIDS/
 │   ├── API.md                  # 接口契约 + 错误码分段
 │   ├── 工程化门禁方案.md        # ★ 本门禁体系的设计说明
 │   └── sql/                    # schema.sql / mock_schema.sql / seed.sql
+├── aids-backend/               # 三服务镜像的依赖清单（由 pyproject.toml 生成）
+├── aids-ai/                    #   └ 对应 deploy/app/{backend,ai,mock}.Dockerfile
+├── aids-mock/                  #      的构建上下文
 ├── deploy/                     # Docker Compose（9 服务分档）
 ├── scripts/hooks/              # pre-commit hook 脚本
+├── scripts/gen_requirements.py # 依赖清单生成器 + 一致性门禁
 ├── .pre-commit-config.yaml     # 门禁 L1
 └── .github/workflows/ci.yml    # 门禁 L2/L3
 ```
@@ -87,9 +93,13 @@ AIDS/
 
 | 层 | 触发 | 内容 | 时长 |
 |---|---|---|---|
-| **L1** | pre-commit（本地） | ruff、敏感文件、残留文件、错误码扫描、枚举扫描 | < 5s |
-| **L2** | PR（GitHub Actions） | 契约测试（真实 MySQL 8）、不变量测试、pyright | < 5min |
+| **L1** | pre-commit（本地） | 文档一致性门禁、ruff、敏感文件、残留文件、错误码扫描、枚举扫描 | < 5s |
+| **L2** | PR（GitHub Actions） | **文档一致性门禁（第一步）**、契约测试（真实 MySQL 8）、不变量测试、pyright | < 5min |
 | **L3** | merge 到 main | compose 最小档冒烟 | < 15min |
+
+> 文档一致性门禁（`docs/tools/gen_data_dictionary.py --check`，33 项）**必须是第一步**：
+> 它拦的是"文档与代码已经互相矛盾"这类结构性漂移，一旦漂移，后面的测试全绿也没有意义。
+> 它纯标准库实现，不需要装任何依赖，因此不会因为依赖问题被跳过。
 
 ### 八类契约测试
 
@@ -143,6 +153,10 @@ python -m tests.contract.scan_enum_magic_numbers app
 
 # 启动断言（模拟生产启动）
 APP_ENV=production SECRET_KEY=xxx python -m app.core.config
+
+# 依赖清单（唯一来源是 pyproject.toml，三份清单是派生物）
+python3 scripts/gen_requirements.py --write     # 改完 pyproject.toml 后重新生成
+python3 scripts/gen_requirements.py --check     # 校验（pre-commit 与 CI 跑的就是这条）
 ```
 
 ---
@@ -159,6 +173,11 @@ APP_ENV=production SECRET_KEY=xxx python -m app.core.config
 | 新增 UNIQUE 索引 | `DATA-DICTIONARY.md` §四 | C8 |
 | 改统一响应结构 | `API.md` §1.1 | C7 |
 | 改不变量规则 | `DATA-DICTIONARY.md` §四 | C3/C5/C6 |
+| 依赖增删/升级 | 只改 `pyproject.toml`，再跑 `scripts/gen_requirements.py --write` | pre-commit `requirements-sync` + CI consistency |
+
+> **依赖只有一处来源**：`pyproject.toml`。`aids-backend/`、`aids-ai/`、`aids-mock/`
+> 三个目录里的 `requirements.txt` 是**生成物**（Dockerfile 构建时要拷的文件），
+> 手工编辑会被 pre-commit 与 CI 同时拦下。
 
 ---
 
@@ -175,6 +194,7 @@ APP_ENV=production SECRET_KEY=xxx python -m app.core.config
 ## 相关文档
 
 - [工程化门禁方案](docs/工程化门禁方案.md) — 本门禁体系为什么这样设计
+- [项目设计报告](docs/项目设计报告.md) — 逐文件职责说明 + 两轮核查发现的优化清单（§11）
 - [PRD](docs/PRD.md) — 需求与技术架构
 - [TASKS](docs/TASKS.md) — 7 梯次任务清单
 - [DATA-DICTIONARY](docs/DATA-DICTIONARY.md) — 数据字典与不变量

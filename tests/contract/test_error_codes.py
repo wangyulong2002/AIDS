@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.core.errors import (
@@ -45,6 +47,13 @@ def _code_to_class() -> dict[int, str]:
 CODE_INDEX: dict[int, str] = _code_to_class()
 
 
+def _write_snippet(tmp_path: Path, snippet: str) -> Path:
+    """把一段代码写进临时文件，供扫描器回归测试使用。"""
+    target = tmp_path / "sample.py"
+    target.write_text(snippet + "\n", encoding="utf-8")
+    return target
+
+
 class TestSegmentsMatchDoc:
     """分段表（§1.2）必须与代码常量逐字一致。"""
 
@@ -57,6 +66,72 @@ class TestSegmentsMatchDoc:
             f"  仅文档: { {k: v for k, v in DOC_SEGMENTS.items() if ERROR_SEGMENTS.get(k) != v} }\n"
             f"  仅代码: { {k: v for k, v in ERROR_SEGMENTS.items() if DOC_SEGMENTS.get(k) != v} }"
         )
+
+
+class TestSegmentOwnership:
+    """每个声明的非 0 段位都必须有归属枚举类。
+
+    为什么必须断言：API.md §1.2 与 PRD §5.4 声明了 9 个业务段位。
+    若某段位在代码里没有归属枚举类，它就成为"文档说存在、代码不认、
+    扫描器也扫不到"的**悬空段**——9xxxx 曾长期如此：
+    扫描区间止于 89999，该段的硬编码错误码永远漏检。
+    """
+
+    def test_every_segment_has_owning_class(self) -> None:
+        declared = {seg for seg in ERROR_SEGMENTS if seg != 0}
+        owned = set(ERROR_DOMAIN_MAP)
+        assert owned == declared, (
+            f"段位与枚举类不匹配：声明 {sorted(declared)}，有归属 {sorted(owned)}；"
+            f"缺归属 {sorted(declared - owned)}，多余归属 {sorted(owned - declared)}"
+        )
+
+
+class TestScannerCoverage:
+    """C4 扫描器的码区间必须覆盖全部分段。"""
+
+    def test_scanner_range_covers_all_segments(self) -> None:
+        """区间与 ERROR_SEGMENTS 两处各写一套，必然漂移——这里把它钉住。"""
+        from tests.contract.scan_error_codes import _CODE_MAX, _CODE_MIN
+
+        segments = [seg for seg in ERROR_SEGMENTS if seg != 0]
+        lowest = min(segments) * 10000 + 1
+        highest = max(segments) * 10000 + 9999
+        assert lowest >= _CODE_MIN, f"扫描器下界 {_CODE_MIN} 高于最小段位码 {lowest}"
+        assert highest <= _CODE_MAX, (
+            f"扫描器上界 {_CODE_MAX} 低于最大段位码 {highest}——"
+            f"{max(segments)}xxxx 段的硬编码错误码会被静默放过"
+        )
+
+
+class TestScannerCatchesHardcodedCodes:
+    """回归：以下写法曾全部从 C4 扫描器的指缝里漏过去。"""
+
+    _EVASIONS = [
+        'fail(10001, "参数错误")',  # 位置参数
+        '{"code": 40002}',  # 字典字面量
+        "raise BizError(50001)",  # 构造式位置参数
+        "error_code = 70001",  # 赋值给 code 类变量
+        '{"code": 90001}',  # 9xxxx 段（曾整个落在扫描区间之外）
+        "{**base, 'error_code': 30003}",  # 展开字典里的 code
+    ]
+
+    _ALLOWED = [
+        "raise BizError(code=CommonError.PARAM_INVALID)",
+        "order_id = 40002",  # 名字不含 code，不是错误码字段
+        "timeout = 30000",  # 常见配置值，不得误报
+    ]
+
+    @pytest.mark.parametrize("snippet", _EVASIONS)
+    def test_scanner_flags(self, tmp_path: Path, snippet: str) -> None:
+        from tests.contract.scan_error_codes import scan_file
+
+        assert scan_file(_write_snippet(tmp_path, snippet)), f"C4 扫描器漏检：{snippet}"
+
+    @pytest.mark.parametrize("snippet", _ALLOWED)
+    def test_scanner_allows(self, tmp_path: Path, snippet: str) -> None:
+        from tests.contract.scan_error_codes import scan_file
+
+        assert not scan_file(_write_snippet(tmp_path, snippet)), f"C4 扫描器误报：{snippet}"
 
 
 class TestCodesCoveredByDoc:

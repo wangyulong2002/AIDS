@@ -31,6 +31,25 @@ pytestmark = pytest.mark.invariant
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 APP_DIR = PROJECT_ROOT / "app"
 
+# 鉴权模块是 userId 的**合法**来源（从 JWT 解出），唯一豁免。
+# 按**路径**豁免，不按文件名——历史写法 `p.name != "security.py"` 会让
+# 任何 app/**/security.py 都自动免疫。
+_ALLOWED_RELATIVE = "app/core/security.py"
+
+# 请求来源关键字：命中即认为"从请求取 userId"
+_REQUEST_SOURCES = ("request", "req", "query", "query_params", "params", "body", "payload")
+
+# 覆盖三种取用形态（原实现只覆盖 `body.user_id` 一种）：
+#   body.user_id              → 属性访问
+#   payload["user_id"]        → 下标访问
+#   body.get("userId")        → 字典 get（FastAPI 里最常见）
+_USER_ID_FROM_REQUEST = re.compile(
+    r"\b(?:"
+    + "|".join(_REQUEST_SOURCES)
+    + r")\b(?:\s*\.\s*\w+)*(?:\.\s*get\s*\(\s*|\.\s*\[|\s*\[|\.\s*)['\"]?user_?id['\"]?",
+    re.IGNORECASE,
+)
+
 
 # =====================================================================
 # ① 静态扫描：禁止从请求参数读 userId 做权限判断
@@ -54,20 +73,14 @@ class TestNoUserIdFromRequest:
         - 内部服务接口（BE-06，走服务间鉴权而非用户 JWT）
     """
 
-    # 请求来源的关键字（命中即认为是从请求取）
-    _REQUEST_SOURCES = ("request", "req", "query", "params", "body", "payload")
-
     def _iter_py_files(self) -> list[Path]:
         if not APP_DIR.exists():
             return []
-        return [p for p in APP_DIR.rglob("*.py") if p.name != "security.py"]
+        allowed = (APP_DIR / "core" / "security.py").resolve()
+        return [p for p in APP_DIR.rglob("*.py") if p.resolve() != allowed]
 
     def test_no_user_id_parameter_extraction(self) -> None:
-        """扫描形如 `request.args.get("user_id")` / `query.user_id` 的用法。"""
-        pattern = re.compile(
-            r"(?:request|req|query|params|body|payload)\s*[\.\[]\s*['\"]?user_?id['\"]?",
-            re.IGNORECASE,
-        )
+        """扫描 `request.args.get("user_id")` / `body.get("userId")` / `payload["user_id"]`。"""
         violations: list[str] = []
         for path in self._iter_py_files():
             try:
@@ -77,7 +90,7 @@ class TestNoUserIdFromRequest:
             for i, line in enumerate(source.splitlines(), 1):
                 if line.strip().startswith("#"):
                     continue
-                if pattern.search(line):
+                if _USER_ID_FROM_REQUEST.search(line):
                     violations.append(f"{path}:{i}: {line.strip()}")
 
         assert not violations, (
@@ -110,6 +123,40 @@ class TestNoUserIdFromRequest:
         assert not bad_defs, "发现疑似从请求取 userId 的函数定义：\n" + "\n".join(
             f"  {d}" for d in bad_defs
         )
+
+
+class TestIdorScannerPattern:
+    """回归：正则必须覆盖 FastAPI 的常见取用形态，且不误伤"按 user_id 过滤资源"。
+
+    为什么要单测正则：扫描器的漏检是**静默的**——它不报错，只是抓不到。
+    原实现只认 `body.user_id` 一种形态，`body.get("userId")`（FastAPI 里最常见）
+    和 `payload["user_id"]` 都能大摇大摆走过去，而这正类漏洞是 PRD §13 列为"高"的风险。
+    """
+
+    _MUST_MATCH = [
+        'request.args.get("user_id")',
+        'body.get("userId")',
+        'payload["user_id"]',
+        "query.userId",
+        'query_params.get("user_id")',
+        "req.query.user_id",
+        "body.user_id",
+    ]
+
+    _MUST_NOT_MATCH = [
+        "biz_order.user_id == uid",  # 资源过滤（正确写法）
+        "filter(BizOrder.user_id == current_user_id)",
+        "Where(id=order_id, user_id=current_user_id)",
+        "def get_current_user_id(token: str) -> int:",  # 从 Token 解析，合法
+    ]
+
+    @pytest.mark.parametrize("line", _MUST_MATCH)
+    def test_pattern_matches(self, line: str) -> None:
+        assert _USER_ID_FROM_REQUEST.search(line), f"IDOR 扫描器漏检：{line}"
+
+    @pytest.mark.parametrize("line", _MUST_NOT_MATCH)
+    def test_pattern_does_not_match(self, line: str) -> None:
+        assert not _USER_ID_FROM_REQUEST.search(line), f"IDOR 扫描器误报：{line}"
 
 
 # =====================================================================

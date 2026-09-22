@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from enum import IntEnum
+from pathlib import Path
 
 import pytest
 
@@ -115,3 +116,52 @@ class TestEnumDuplicationGuard:
                 assert int(member.value) in doc, (
                     f"{table_field}.{member.name}={member.value} 在文档中无对应行"
                 )
+
+
+def _write_snippet(tmp_path: Path, snippet: str) -> Path:
+    """把一段代码写进临时文件，供扫描器回归测试使用。"""
+    target = tmp_path / "sample.py"
+    target.write_text(snippet + "\n", encoding="utf-8")
+    return target
+
+
+class TestScannerCatchesMagicNumbers:
+    """回归：以下写法曾是 C2 扫描器的"指缝"（全部静默通过）。
+
+    为什么要在契约测试里钉住扫描器：门禁的价值全在"拦得住"。
+    扫描器的规则一松（例如把 0/1 整体豁免），门禁就退化成心理安慰，
+    而**没有任何东西会告诉你它失效了**——除了这组回归用例。
+    """
+
+    # 这些必须被拦下
+    _EVASIONS = [
+        "order.status == 20",  # 属性比较
+        "payment.status == 0",  # 0/1 曾是"无语义数字"被整体放行
+        'd["status"] == 30',  # 下标比较
+        "order.status = 40",  # 属性赋值
+        "q.filter(status=20)",  # 关键字参数
+        'd["status"] = 30',  # 下标赋值
+        "order.status += 10",  # 增量赋值
+        "status = 30",  # 裸名赋值
+    ]
+
+    # 这些不得误报
+    _ALLOWED = [
+        "ROLE_ADMIN = 1",  # 全大写常量定义（命名约定）
+        "ADJUST_REASON_REQUIRED = 80001",  # 同上：错误码枚举成员
+        "order.status == OrderStatus.PAID",
+        "total = total + 1",
+        "order.status = 1  # enum-ok: 与状态语义无关",
+    ]
+
+    @pytest.mark.parametrize("snippet", _EVASIONS)
+    def test_scanner_flags(self, tmp_path: Path, snippet: str) -> None:
+        from tests.contract.scan_enum_magic_numbers import scan_file
+
+        assert scan_file(_write_snippet(tmp_path, snippet)), f"C2 扫描器漏检：{snippet}"
+
+    @pytest.mark.parametrize("snippet", _ALLOWED)
+    def test_scanner_allows(self, tmp_path: Path, snippet: str) -> None:
+        from tests.contract.scan_enum_magic_numbers import scan_file
+
+        assert not scan_file(_write_snippet(tmp_path, snippet)), f"C2 扫描器误报：{snippet}"

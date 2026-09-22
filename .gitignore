@@ -14,6 +14,9 @@ env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# hypothesis 会在 .hypothesis/ 内自动生成 .gitignore（内容为 *）而自忽略；
+# 这里显式写一行，避免读者以为漏了规则。
+.hypothesis/
 .coverage
 htmlcov/
 coverage.xml
@@ -54,16 +57,27 @@ node_modules/
 web/**/dist/
 admin/**/dist/
 
-# ---- 临时/探针文件（下划线开头一律不入库）----
-# 与 scripts/hooks/forbid_temp_files.sh 互为双保险
-app/_*
-tests/_*
-scripts/_*
-docs/_*
-*/_*.py
-*_wtest*
+# ---- 临时/探针文件 ----
+# 与 scripts/hooks/forbid_temp_files.sh 互为双保险。
+#
+# ★ 这里**刻意不使用**宽泛的 `_*` / `*/_*.py` / `app/_*` 形态：
+#   它们会连 `__init__.py`（包标识，必须以 `_` 开头）一起忽略。
+#   历史教训：`*/_*.py` 让 `app/__init__.py` 长期进不了版本库，
+#   而"少了一个 __init__.py"没有任何测试会发现（import 照样成功）。
+#   同理 `_doc_parser.py`（契约测试的公共解析器，命名以 `_` 开头是刻意的）
+#   也会被这类规则误伤。
+# 因此：**按具体残留形态收口**；宽泛拦截交给 forbid_temp_files.sh（它有显式白名单），
+# 并由 tests/invariants/test_guard_selfcheck.py 断言"受跟踪文件不被任何忽略规则命中"。
+**/_probe*.py
+**/_tmp*.py
+**/_scan_*.py
+**/_wtest*
 *.bak
 *.orig
 *.rej
 *~
 *.tmp
+
+# ---- 工具探针输出（根目录，pyright/临时脚本）----
+_*.json
+_*.txt

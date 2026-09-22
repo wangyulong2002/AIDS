@@ -91,13 +91,11 @@ def parse_enum_mappings() -> dict[str, dict[int, tuple[str, str]]]:
     for line in section:
         m = heading_re.match(line)
         if m:
-            # typeshed 把 group() 标成 AnyStr | MaybeNone，显式收窄
+            # typeshed 把 group() 标成 str | None，显式收窄（否则 pyright 报 2 处）
             current = cast(str, m.group(1)).strip()
             result[current] = {}
             continue
-        if current is None:
-            continue
-        if not line.strip().startswith("|"):
+        if current is None or not line.strip().startswith("|"):
             continue
         cells = _split_row(line)
         if len(cells) < 3:
@@ -182,9 +180,7 @@ def parse_field_details() -> dict[str, list[str]]:
             current = cast(str, m.group(1)).strip()
             result[current] = []
             continue
-        if current is None:
-            continue
-        if not line.strip().startswith("|"):
+        if current is None or not line.strip().startswith("|"):
             continue
         cells = _split_row(line)
         if len(cells) < 4:
@@ -309,9 +305,13 @@ def parse_schema_tables() -> dict[str, list[str]]:
 
 @lru_cache(maxsize=1)
 def parse_schema_unique_indexes() -> dict[str, set[str]]:
-    """解析 schema.sql 中每个表的 UNIQUE 索引列集合。
+    """解析 schema.sql 中每个表的 UNIQUE 索引**名**集合。
 
     返回：{ "biz_user": {"uk_mobile_hash"}, ... }
+
+    注意：本函数只返回索引名。**"该表存在 UNIQUE KEY" 不足以证明幂等性**——
+    索引建在错的列上同样会通过，而线上表现是"重复扣库存"。
+    需要校验列清单时用 ``parse_schema_unique_index_columns()``。
     """
     sql = SCHEMA_SQL.read_text(encoding="utf-8")
     result: dict[str, set[str]] = {}
@@ -326,5 +326,38 @@ def parse_schema_unique_indexes() -> dict[str, set[str]]:
             if km and line.upper().startswith("UNIQUE"):
                 keys.add(km.group("kname"))
         result[name] = keys
+
+    return result
+
+
+_UNIQUE_KEY_LINE = re.compile(
+    r"^UNIQUE\s+(?:KEY|INDEX)\s+`(?P<kname>\w+)`\s*\((?P<cols>[^)]*)\)",
+)
+
+
+@lru_cache(maxsize=1)
+def parse_schema_unique_index_columns() -> dict[str, dict[str, tuple[str, ...]]]:
+    """解析 schema.sql 中每个 UNIQUE 索引的**列清单**。
+
+    返回：{ "biz_stock_log": {"uk_idempotent_key": ("idempotent_key",)}, ... }
+
+    为什么必须有它（C8 的漏洞所在）：原实现只暴露索引名，于是
+    ``assert keys`` 成了唯一断言——把 ``UNIQUE KEY (idempotent_key)``
+    误建成 ``UNIQUE KEY (id)`` 也照样通过。
+    """
+    sql = SCHEMA_SQL.read_text(encoding="utf-8")
+    result: dict[str, dict[str, tuple[str, ...]]] = {}
+
+    for m in _CREATE_TABLE.finditer(sql):
+        name = m.group("name")
+        body = m.group("body")
+        indexes: dict[str, tuple[str, ...]] = {}
+        for raw in body.splitlines():
+            km = _UNIQUE_KEY_LINE.match(raw.strip())
+            if not km:
+                continue
+            cols = tuple(c.strip().strip("`") for c in km.group("cols").split(",") if c.strip())
+            indexes[km.group("kname")] = cols
+        result[name] = indexes
 
     return result
