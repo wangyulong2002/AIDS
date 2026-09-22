@@ -126,9 +126,42 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: 载入 DDL（真实建表）
+        # 为什么用 root 而不是应用账号 aids：
+        #   schema.sql 含 CREATE DATABASE + USE，需要建库权限；服务容器的
+        #   MYSQL_USER=aids 只被授予 MYSQL_DATABASE(aids_shop_test) 上的权限，
+        #   建库直接 Access denied。用 root 执行，再把权限显式授给应用账号。
+        #
+        # 为什么用 sed 替换库名，而不是给 SQL 引入变量：
+        #   schema.sql / seed.sql 里的库名是固定字面量 `aids_shop`。曾试过写成
+        #   ${AIDS_MAIN_DB:-aids_shop}（像 shell 那样），实测 mysql 8.4.11 **不展开**：
+        #   SHOW DATABASES 里出现字面名为 "${AIDS_MAIN_DB:-aids_shop}" 的库，38 张表
+        #   全建了进去，且全程不报错。静默建错库比直接失败更难排查，故改回 sed。
+        #   sed 只锚定反引号包裹的 `aids_shop`，不会误伤注释里出现的裸词 aids_shop。
+        #
+        # 为什么不能反过来"让 CI 也建 aids_shop"：
+        #   启动断言 S1-d（app/core/config.py::assert_db_is_isolated）禁止 test 环境
+        #   连库名含 aids_shop 的库；建得图省事，测试连的瞬间就被拒启。
         run: |
-          mysql -h 127.0.0.1 -P 13306 -uaids -paids_pass aids_shop_test \
-            < docs/sql/schema.sql
+          set -euo pipefail
+
+          # 1) 以 root 建库建表；库名 aids_shop -> aids_shop_test
+          #    --default-character-set=utf8mb4：防止中文 COMMENT 在非 UTF8 连接下变问号
+          sed 's/`aids_shop`/`aids_shop_test`/g' docs/sql/schema.sql \
+            | mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 13306 -uroot -proot
+
+          # 2) 授权给应用账号（否则后面用 aids 连接会 Access denied）
+          mysql -h 127.0.0.1 -P 13306 -uroot -proot -e \
+            "GRANT ALL PRIVILEGES ON \`aids_shop_test\`.* TO 'aids'@'%'; FLUSH PRIVILEGES;"
+
+          # 3) 自检：表数必须为 38。这一步是"静默建错库"事故的直接产物——
+          #    没有它，建到别的库上时后续测试会以"表不存在"的面目出现，误导排查方向。
+          n=$(mysql -h 127.0.0.1 -P 13306 -uroot -proot -N -B -e \
+            "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='aids_shop_test';")
+          echo "aids_shop_test 表数 = $n"
+          if [ "$n" != "38" ]; then
+            echo "::error::期望 38 张表，实际 $n —— DDL 未完整导入。"
+            exit 1
+          fi
         continue-on-error: false
 
       - name: C1/C2/C4/C7/C8 契约测试（静态层）

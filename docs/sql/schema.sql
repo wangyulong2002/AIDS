@@ -19,6 +19,18 @@
 --
 -- 配套文件:
 --   mock_schema.sql —— Mock 支付/短信/物流服务独立库（独立部署，独立 schema）
+--
+-- 【CI 如何建到隔离测试库】本文件的库名是固定字面量 `aids_shop`。CI 的目标是
+--   独立库 `aids_shop_test`，做法是导入前用 sed 替换库名（见 .github/workflows/ci.yml
+--   的「载入 DDL」步骤），而不是在这里引入变量。
+--   为什么不写成 ${AIDS_MAIN_DB:-aids_shop}：**mysql 客户端不展开这种写法**。
+--   实测（mysql 8.4.11）：建库后 SHOW DATABASES 出现字面名为
+--   "${AIDS_MAIN_DB:-aids_shop}" 的库，38 张表全建了进去。它看起来像 shell 变量，
+--   但 SQL 文件里的 ${...} 对客户端只是普通文本，既不展开也不报错——
+--   静默把表建进一个垃圾库，比直接失败更难排查。（CI 步骤里因此加了表数自检。）
+--   为什么不能反过来"让 CI 也建 aids_shop 再改连接串"：启动断言 S1-d
+--   （app/core/config.py::assert_db_is_isolated）**禁止** test 环境连库名含
+--   aids_shop 的库。建的时候图省事，测试连上的瞬间就会拒启。
 -- =============================================================
 CREATE DATABASE IF NOT EXISTS `aids_shop`
   DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;

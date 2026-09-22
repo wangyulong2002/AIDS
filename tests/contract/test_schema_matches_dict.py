@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import text
 
 from tests.contract._doc_parser import (
     parse_field_details,
@@ -185,9 +186,12 @@ class TestSchemaReflection:
     """
 
     def test_reflected_table_count(self, db_conn) -> None:
+        # SQLAlchemy 2.0 起 execute() 不再接受裸字符串，必须 text() 包裹
         rows = db_conn.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+            )
         ).fetchall()
         actual = {r[0] for r in rows}
         expected = set(SCHEMA_TABLES)
@@ -199,8 +203,10 @@ class TestSchemaReflection:
 
     def test_reflected_field_counts(self, db_conn) -> None:
         rows = db_conn.execute(
-            "SELECT table_name, COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = DATABASE() GROUP BY table_name"
+            text(
+                "SELECT table_name, COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() GROUP BY table_name"
+            )
         ).fetchall()
         actual = {r[0]: r[1] for r in rows}
         mismatches = [
