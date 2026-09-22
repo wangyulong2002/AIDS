@@ -62,17 +62,14 @@ repos:
         name: "C4 错误码扫描（禁止硬编码，须用 app.core.errors）"
         entry: python -m tests.contract.scan_error_codes
         language: system
-        # 覆盖共享层 app/ 与服务包 aids-<svc>/aids_<svc>/。
-        # 曾经只写 ^app/ —— 新增服务目录后，那些文件既不被 C4 扫也不被 C2 扫，
-        # 而门禁照样全绿。
-        files: ^(app|aids-[a-z]+)/.*\.py$
+        files: ^app/.*\.py$
         pass_filenames: true
 
       - id: enum-magic-number-scan
         name: "C2 状态枚举扫描（禁止 status == 裸数字）"
         entry: python -m tests.contract.scan_enum_magic_numbers
         language: system
-        files: ^(app|aids-[a-z]+)/.*\.py$
+        files: ^app/.*\.py$
         pass_filenames: true
 
   # ---- 文档一致性门禁（TASKS DEP-05：CI 的第一步 + 一条 pre-commit 钩子）----

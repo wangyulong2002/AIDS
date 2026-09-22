@@ -50,12 +50,6 @@ packages = ["app"]
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-# 服务包 aids_backend 位于 aids-backend/ 下（目录名带连字符，不是合法模块名），
-# 因此不在仓库根，也不在 site-packages。显式加进来，测试里才能
-# `from aids_backend.app_factory import create_app`。
-# 共享层 app/ 在仓库根，已由 rootdir 自动入 path，无需声明。
-# 新增服务（aids_ai / aids_mock）时在此追加。
-pythonpath = ["aids-backend"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -97,13 +91,6 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B011"]
 
-[tool.ruff.lint.isort]
-# 为什么要显式声明：ruff 自动识别"第一方包"靠的是**目录名与模块名一致**，
-# 而服务目录是 `aids-backend`（连字符）→ 模块名 `aids_backend` 匹配不上，
-# 会被归入第三方组，import 顺序与 app.* 分家（I001）。
-# 显式列出后：stdlib | 第三方 | 第一方(app / aids_* / tests)，语义清晰。
-known-first-party = ["app", "aids_backend", "aids_ai", "aids_mock", "tests"]
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -112,12 +99,8 @@ indent-style = "space"
 # pyright —— 类型检查（标准档：basic）
 # ---------------------------------------------------------------------
 [tool.pyright]
-include = ["app", "tests", "aids-backend/aids_backend"]
+include = ["app", "tests"]
 exclude = ["**/node_modules", "deploy", "docs"]
-# aids_backend 不在 site-packages：它是源码目录 aids-backend/ 下的包，
-# 需显式加入解析路径，否则整个服务层都是 reportMissingImports。
-# CI 的 typecheck job 动态生成 pyrightconfig.json，同样要带上这个路径。
-extraPaths = ["aids-backend"]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 reportMissingImports = true

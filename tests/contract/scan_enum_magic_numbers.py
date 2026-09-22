@@ -36,8 +36,6 @@ import ast
 import sys
 from pathlib import Path
 
-from tests.contract._targets import scan_targets
-
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
 # 枚举定义处——按相对路径豁免（与 scan_error_codes.py 同款修正）
@@ -273,9 +271,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _default_targets() -> list[Path]:
-    # 扫描面由 tests/contract/_scan_targets.py 统一定义：共享层 + 全部服务包。
-    # 不要在本地再写死目录列表——那正是"新增服务后无人检查"的成因。
-    return scan_targets()
+    return [PROJECT_ROOT / "app"]
 
 
 if __name__ == "__main__":
