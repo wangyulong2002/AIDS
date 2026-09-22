@@ -1,0 +1,73 @@
+# =============================================================
+# pre-commit —— CI 门禁 L1（本地，< 5s）
+#
+# 安装：pip install pre-commit && pre-commit install
+# 全量跑：pre-commit run --all-files
+#
+# 设计原则（见 docs/工程化门禁方案.md）：
+#   违规必须"当场可见"，不依赖开发者自觉。
+# =============================================================
+default_language_version:
+  python: python3.11
+
+repos:
+  # ---- 基础卫生 ----
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+        exclude: \.md$
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ---- S7：环境变量/密钥文件禁入 ----
+  - repo: local
+    hooks:
+      - id: forbid-sensitive-files
+        name: "S7 禁止提交 .env 与密钥文件"
+        entry: bash scripts/hooks/forbid_sensitive_files.sh
+        language: system
+        files: '(^|/)\.env$|\.pem$|\.key$'
+        exclude: '\.example$'
+
+  # ---- 残留文件扫描（项目特有）----
+      - id: forbid-temp-files
+        name: "禁止提交临时/测试残留文件"
+        entry: bash scripts/hooks/forbid_temp_files.sh
+        language: system
+        pass_filenames: true
+
+  # ---- ruff：格式 + lint ----
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # ---- 项目契约扫描器 ----
+  - repo: local
+    hooks:
+      - id: error-code-scan
+        name: "C4 错误码扫描（禁止硬编码，须用 app.core.errors）"
+        entry: python -m tests.contract.scan_error_codes
+        language: system
+        files: ^app/.*\.py$
+        pass_filenames: true
+
+      - id: enum-magic-number-scan
+        name: "C2 状态枚举扫描（禁止 status == 裸数字）"
+        entry: python -m tests.contract.scan_enum_magic_numbers
+        language: system
+        files: ^app/.*\.py$
+        pass_filenames: true

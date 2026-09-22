@@ -1,0 +1,69 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ---- 环境变量与密钥（S7 结构性防御）----
+.env
+.env.*
+!.env.example
+deploy/.env
+*.pem
+*.key
+!deploy/nginx/*.key.example
+
+# ---- 本地方案/数据（S7）----
+*.db
+*.sqlite3
+*.sql.gz
+_backup_*/
+uploads/
+data/
+logs/
+*.log
+
+# ---- 修复产物备份（防误提交）----
+docs/_P0修复产物/_backup_*/
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.swp
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Node（前端工程）----
+node_modules/
+web/**/dist/
+admin/**/dist/
+
+# ---- 临时/探针文件（下划线开头一律不入库）----
+# 与 scripts/hooks/forbid_temp_files.sh 互为双保险
+app/_*
+tests/_*
+scripts/_*
+docs/_*
+*/_*.py
+*_wtest*
+*.bak
+*.orig
+*.rej
+*~
+*.tmp

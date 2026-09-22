@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>AIDS 开发环境</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+           max-width: 720px; margin: 80px auto; padding: 0 24px; color: #1a1a1a; }
+    h1 { font-size: 22px; font-weight: 600; }
+    code { background: #f4f4f5; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+    li { margin: 8px 0; line-height: 1.7; }
+    .muted { color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>AIDS 开发环境已启动</h1>
+  <p class="muted">此页面是 Nginx 占位页。前端工程启动后，由 Vite dev server 接管页面渲染。</p>
+  <p>中间件入口：</p>
+  <ul>
+    <li>MinIO 控制台 — <code>http://localhost:9001</code></li>
+    <li>Milvus 健康检查 — <code>http://localhost:9091/healthz</code>（需 <code>--profile search</code>）</li>
+  </ul>
+  <p>后端 API 经此 Nginx 反代：<code>/api/**</code> → FastAPI 主业务，<code>/api/ai/**</code> → FastAPI AI 服务</p>
+</body>
+</html>

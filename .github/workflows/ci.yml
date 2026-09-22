@@ -1,0 +1,195 @@
+# =============================================================
+# AIDS CI 门禁
+#
+# 设计见 docs/工程化门禁方案.md：
+#   L1 pre-commit（本地，< 5s）—— 见 .pre-commit-config.yaml
+#   L2 PR（本文件 lint / contract / typecheck，< 5min）
+#   L3 merge 到 main（smoke，< 15min）
+#
+# 核心思想：约束产出（代码能不能过检查），而非约束输入（AI 读没读文档）。
+# =============================================================
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ---------------------------------------------------------------
+  # L2-a 代码风格与静态检查
+  # ---------------------------------------------------------------
+  lint:
+    name: Lint (ruff + 扫描器)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: pip install "ruff>=0.8" "pydantic>=2.9"
+
+      - name: ruff format 检查
+        run: ruff format --check app tests
+
+      - name: ruff lint
+        run: ruff check app tests
+
+      - name: C4 错误码扫描（禁止硬编码错误码）
+        run: python -m tests.contract.scan_error_codes app
+
+      - name: C2 状态枚举扫描（禁止魔法数字）
+        run: python -m tests.contract.scan_enum_magic_numbers app
+
+  # ---------------------------------------------------------------
+  # L2-b 契约测试 —— 本门禁的核心
+  #
+  # 必须跑在真实 MySQL 8 上：C1/C8 依赖 CHECK 约束、ngram 全文索引、
+  # UNIQUE 语义，SQLite 测不出来。
+  # ---------------------------------------------------------------
+  contract:
+    name: Contract (文档 ↔ 代码一致性)
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: aids_shop_test
+          MYSQL_USER: aids
+          MYSQL_PASSWORD: aids_pass
+        ports:
+          - 13306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+          --default-time-zone=+00:00
+
+    env:
+      APP_ENV: test
+      DATABASE_URL: mysql+asyncmy://aids:aids_pass@127.0.0.1:13306/aids_shop_test?charset=utf8mb4
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: |
+          pip install "pytest>=8.3" "pydantic>=2.9" "hypothesis>=6.120"
+          pip install "sqlalchemy>=2.0" "pymysql>=1.1"
+
+      - name: 载入 DDL（真实建表）
+        run: |
+          mysql -h 127.0.0.1 -P 13306 -uaids -paids_pass aids_shop_test \
+            < docs/sql/schema.sql
+        continue-on-error: false
+
+      - name: C1/C2/C4/C7/C8 契约测试（静态层）
+        run: pytest tests/contract -q -m contract
+
+      - name: C1 契约测试（反射层，连真实库）
+        run: pytest tests/contract -q -m requires_mysql
+
+  # ---------------------------------------------------------------
+  # L2-c 不变量测试 —— 库存/幂等/退款/IDOR/启动断言
+  # ---------------------------------------------------------------
+  invariants:
+    name: Invariants (业务不变量)
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: pip install "pytest>=8.3" "pydantic>=2.9" "hypothesis>=6.120"
+
+      - name: 库存/幂等/退款/优惠券不变量
+        run: pytest tests/invariants -q -m invariant
+
+      - name: 启动断言（S1 结构性防御）
+        run: pytest tests/invariants/test_startup_assertions.py -q
+
+  # ---------------------------------------------------------------
+  # L2-d 类型检查（标准档：basic）
+  # ---------------------------------------------------------------
+  typecheck:
+    name: Typecheck (pyright basic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: pip install "pydantic>=2.9" "sqlalchemy>=2.0"
+
+      - name: pyright
+        uses: jakebailey/pyright-action@v2
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+  # ---------------------------------------------------------------
+  # L3 冒烟：仅 main 分支，起 compose 最小档跑关键链路
+  #
+  # 当前 0 业务代码，暂以占位实现（只验证 compose 可拉起）。
+  # T1 起替换为真实链路：登录 → 下单 → 支付回调。
+  # ---------------------------------------------------------------
+  smoke:
+    name: Smoke (compose 最小档)
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [lint, contract, invariants]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 compose 配置可解析
+        run: docker compose -f deploy/docker-compose.yml config > /dev/null
+
+      - name: 提示（待 T1 接入真实冒烟链路）
+        run: |
+          echo "::notice::当前为 T0 阶段（0 业务代码），冒烟仅校验 compose 配置。"
+          echo "::notice::T1 完成后应替换为：拉起最小档 → 登录 → 下单 → 支付回调。"
+
+  # ---------------------------------------------------------------
+  # 门禁汇总（供分支保护规则引用）
+  # ---------------------------------------------------------------
+  gate:
+    name: 门禁汇总
+    if: always()
+    needs: [lint, contract, invariants, typecheck]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查所有门禁任务
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -qE '"(failure|cancelled)"'; then
+            echo "::error::门禁未通过，禁止合并。"
+            exit 1
+          fi
+          echo "✅ 全部门禁通过。"

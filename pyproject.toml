@@ -1,0 +1,98 @@
+[project]
+name = "aids"
+version = "0.1.0"
+description = "AIDS 企业级电商平台 + AI 智能客服"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14",
+    "asyncmy>=0.2.9",
+    "redis>=5.2",
+    "aiokafka>=0.12",
+    "pyjwt[crypto]>=2.10",
+    "cryptography>=44.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "hypothesis>=6.120",
+    "ruff>=0.8",
+    "pyright>=1.1.390",
+    "pre-commit>=4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+# ---------------------------------------------------------------------
+# pytest —— tests/contract 与 tests/invariants 是 CI 门禁核心
+# ---------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "contract: 文档 ↔ 代码 一致性测试（CI 必过，门禁核心）",
+    "invariant: 业务不变量测试（CI 必过）",
+    "requires_mysql: 需要真实 MySQL 8 实例（CI 提供 services）",
+    "slow: 慢测试",
+]
+
+# ---------------------------------------------------------------------
+# ruff —— 格式与静态检查
+# ---------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["deploy", "docs", ".trae"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",  # 行长度由 formatter 处理
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------
+# pyright —— 类型检查（标准档：basic）
+# ---------------------------------------------------------------------
+[tool.pyright]
+include = ["app", "tests"]
+exclude = ["**/node_modules", "deploy", "docs"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
