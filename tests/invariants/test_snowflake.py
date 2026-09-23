@@ -24,7 +24,7 @@ from app.orm.snowflake import (
     resolve_worker_id,
 )
 
-pytestmark = pytest.mark.invariant
+pytestmark = [pytest.mark.invariant, pytest.mark.task("BE-02")]
 
 # 任意一个"当前附近"的毫秒值，用作冻结时钟的基准
 _BASE_MS = 1_800_000_000_000

@@ -15,6 +15,10 @@
 另含扫描面的覆盖率断言（HANDOFF §9）：
     C2/C4 两个扫描器曾各自写死 `[PROJECT_ROOT / "app"]`，导致 BE-01 新增的
     `aids-backend/aids_backend/` 完全不受门禁约束，且**门禁全绿**。
+
+覆盖面（T1 更新）：三个服务（backend / ai / mock）的 COPY 源存在性与 CMD 模块
+    可解析**全部**受本文件约束。此前 ai / mock 只是"未开工豁免"——豁免期间镜像
+    能否构建无人验证，正是「配置指向不存在的目录」的温床；现豁免清单已清空。
 """
 
 from __future__ import annotations
@@ -39,12 +43,13 @@ _DOCKERFILE_SERVICE: dict[str, str] = {
 }
 
 # 尚未开工的服务镜像：其 COPY 源允许缺失。
-# 开工（补齐服务包）后**必须**从本清单移除 —— test_copy_sources_exist 里的
-# 反向断言会强制提醒，避免这份清单腐烂成永久豁免。
-_PENDING_SERVICES: dict[str, str] = {
-    "aids-ai": "AI 服务未开工（HANDOFF §4：aids-ai/ 仅 requirements.txt）",
-    "aids-mock": "Mock 服务未开工（HANDOFF §4：aids-mock/ 仅 requirements.txt）",
-}
+# **当前为空** —— T1 骨架补齐后，三个服务（backend / ai / mock）的 COPY 源都已
+# 真实存在，所有断言对三者一律生效（不再有"未开工"豁免）。
+#
+# 这份清单不要重新填：它存在的唯一意义是让「未开工」这件事被显式登记，
+# 且 test_copy_sources_exist 有**反向断言**——登记为未开工却什么都不缺，测试会红。
+# 也就是说，填进去就必须真的缺文件，否则等于伪造豁免。
+_PENDING_SERVICES: dict[str, str] = {}
 
 _GUNICORN_CMD = re.compile(r'"gunicorn",\s*"(?P<mod>[a-z_][a-z0-9_]*)\.main:app"')
 

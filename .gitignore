@@ -49,6 +49,12 @@ docs/_P0修复产物/_backup_*/
 # 故此处只忽略 memory/，而不是整个 .workbuddy/。
 .workbuddy/memory/
 
+# ---- AI 工作目录（CodeBuddy）----
+# .codebuddy/skills/ 是从 mattpocock/skills 下载后做本地适配得到的技能库，
+# 属于开发者个人环境配置而非项目代码；不同开发者的技能集合与版本可能不同，
+# 入库只会带来无意义的 diff，故整体忽略，而不是逐个子目录挑拣。
+.codebuddy/
+
 # ---- IDE ----
 .idea/
 .vscode/

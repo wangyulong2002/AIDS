@@ -14,13 +14,31 @@
 | 阶段 | **T0 完成 → T1 进行中** |
 | 已勾选任务 | DOC-01~03、DEP-01~04、BE-00、**BE-01**、**BE-02** |
 | **下一个任务** | **BE-03 鉴权模块**（前置 BE-01 已齐） |
-| 测试基线 | 无 DB：`578 passed / 6 skipped`；有 DB：**`583 passed / 1 skipped`** |
-| 门禁 | 文档一致性 35 项 PASS；`ruff` + `pyright` 0 errors；3 个生成器 `--check` 全绿 |
-| 仓库规模 | 99 个受跟踪文件 / 58 个 Python 文件 |
+| 测试基线 | 无 DB：`603 passed / 6 skipped`；有 DB：**`608 passed / 1 skipped`** |
+| 门禁 | 文档一致性 35 项 PASS；`ruff`（含 `scripts/`）+ `pyright` 0 errors；3 个生成器 `--check` 全绿 |
+| 镜像 | **三个服务镜像已端到端验证**：build 成功 + 容器起得来 + `/health` 返回 `code=0`（见 §4.1） |
+| 仓库规模 | ≈110 个受跟踪文件（含本次新增）；服务包 3 个（backend / ai / mock 骨架齐备） |
 | 远端 | `main` 与 `origin/main` 一致（`df60f82`），无未推送 |
 
-**业务代码量：0 行。** 目前全部是地基（门禁 + 契约测试 + ORM 基建 + 38 表模型）。
+**业务代码量：0 行。** 目前全部是地基（门禁 + 契约测试 + ORM 基建 + 38 表模型 + 三服务骨架）。
 T1 才开始写业务，BE-03 是第一块。
+
+### 0.1 上一轮修复的三个前置条件（B1/B2/B3）
+
+> 背景：`docs/AI自动生成可行性评估报告.md` 判定本项目适合「门禁闭环下的逐任务生成」，
+> 但列出 5 个前置条件。B1/B2/B3 已落地，B4（Ark Key）按用户决定暂缓，B5（范围裁决）待定。
+
+| 编号 | 问题 | 落地方式 |
+|---|---|---|
+| **B1** | 环境边界（跨系统 venv / WSL 跨盘）不产生报错，只让结果不可信 | 新增 `scripts/dev_env_check.py`：解释器版本、跨系统 venv、WSL→NTFS 边界、依赖、S1-d 库隔离、四项 `--check`、中间件容器，一条命令给出结论 |
+| **B2** | 三个服务镜像**从未端到端构建过**；`ai`/`mock` 连服务包都没有；CI 不 build | ① 补齐 `aids_ai` / `aids_mock` 骨架（装配 + 探针 + 统一异常处理）；② CI 新增 `images` job（矩阵并行：build + 起容器打 `/health`）；③ CI smoke 升级为**真拉起 compose 最小档**（38 表自检） |
+| **B3** | 门禁是「文档↔代码」形式门禁，**不判断业务对错** | 新增 C10 `tests/contract/test_task_coverage.py`：`TASKS.md` 中 ✅ 的代码类任务，必须有 `@pytest.mark.task("<任务号>")` 的测试；含 3 条防退化自检（解析器健康、标记指向真实任务、豁免清单反向校验） |
+
+**顺带修掉的**（都是「门禁全绿但产出是错的」同类）：
+
+1. `app/core/handlers.py`：统一异常处理上移到共享层，三个服务共用一份，`aids-*/handlers.py` 只做转出——此前只有主业务有实现，另外两个服务要么复制三份、要么格式不一致。
+2. `tests/invariants/test_guard_selfcheck.py`：bash 解析从「`shutil.which()` 结果」改为**候选列表 + 同构探针**。原因：从 `cmd.exe` 启动时 `C:\Windows\System32\bash.exe`（WSL 启动器）在 PATH 里胜出，它能执行 `bash -c true` 却读不到 `F:\...`，导致 12 个护栏断言全以 rc=127 失败——看起来像"护栏坏了"，实际是选错了 shell。
+3. `scripts/` 此前只在 pre-commit（扫全仓）里被 ruff 检查，CI 只扫 `app tests aids-*` → 出现「L1 红、L2 绿」的错位。现已把 `scripts/` 纳入 CI 扫描面并修掉其 `SIM103`。
 
 ---
 
@@ -53,6 +71,9 @@ C:/Users/heart/.workbuddy/binaries/python/versions/3.11.9/python.exe -m venv .ve
 ### 1.2 跑门禁（**改动后第一件事**）
 
 ```bash
+# 0) 一键自检：解释器 / 跨系统 venv / WSL 跨盘 / 依赖 / 库隔离 / 四项门禁 / 容器
+<python> scripts/dev_env_check.py
+
 # 四项一致性门禁（对应 CI 的第一步）
 <python> docs/tools/gen_data_dictionary.py --check      # 文档 ↔ DDL/枚举/常量，35 项
 python3 scripts/gen_requirements.py --check             # aids-*/requirements.txt ← pyproject.toml
@@ -175,6 +196,30 @@ sed 's/`aids_shop`/`aids_shop_test`/g' docs/sql/schema.sql \
 
 ---
 
+## 4.1 本轮（2026-09-23 第二轮）：修复自动生成的前置条件
+
+按 `docs/AI自动生成可行性评估报告.md` §4，先修 B1/B2/B3（B4 Ark Key 暂缓、B5 范围裁决待定）。
+
+**验证（全部实跑，可复现）**：
+
+| 项 | 结果 |
+|---|---|
+| 全量测试（无 DB） | `603 passed / 6 skipped` |
+| 全量测试（带 `DATABASE_URL` 指向 `aids_shop_test`） | `608 passed / 1 skipped` |
+| 文档一致性门禁 | `PASS 35 项` |
+| 三个生成器 `--check` | 全绿（清单 / 快照 / ORM） |
+| `ruff format --check` + `ruff check`（`app tests aids-* scripts`） | 全绿 |
+| `pyright` | `0 errors, 0 warnings` |
+| **三镜像端到端** | `docker build` ×3 成功；`docker run` ×3 后 `/health` 均返回 `{"code":0,...,"status":"up"}`；未知路径返回 `{"code":10004,...}` + HTTP 404 |
+
+**新增文件**：`app/core/handlers.py`、`scripts/dev_env_check.py`、`tests/contract/test_task_coverage.py`、
+`tests/contract/test_service_skeletons.py`、`aids-ai/aids_ai/**`（5 个）、`aids-mock/aids_mock/**`（5 个）。
+
+**新增/加强的门禁**：C10（任务验收覆盖）、C11 扩展（`_PENDING_SERVICES` 清空，三个服务不再有"未开工豁免"）、
+C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉起最小档、`scripts/` 纳入 ruff 扫描面。
+
+---
+
 ## 5. 下一步：BE-03 鉴权模块
 
 **验收原文**（`docs/TASKS.md`）：
@@ -193,12 +238,19 @@ sed 's/`aids_shop`/`aids_shop_test`/g' docs/sql/schema.sql \
 
 **注意**：`SECRET_KEY` 与 JWT 私钥路径的 S1 断言已存在，鉴权模块应复用而非另起一套。
 
+**收尾动作（C10 门禁会拦）**：把 `TASKS.md` 的 BE-03 勾成 ✅ 之前，先给覆盖其验收标准的测试文件加
+`pytestmark = [pytest.mark.contract, pytest.mark.task("BE-03")]`（或 `pytest.mark.invariant`）。
+没有 `task` 标记时，`tests/contract/test_task_coverage.py` 会红——这条门禁的存在就是为了让
+「任务已完成」必须对应一个真实存在的测试。推荐顺序：**先写测试并打标记，再勾选任务**。
+
 ---
 
 ## 6. 未决 / 已知遗留
 
 | 项 | 状态 |
 |---|---|
+| **B4 · Ark API Key 与真实模型调用** | 按用户决定**暂缓**（本轮不动）。影响 AI-02 起的任务：本地用桩推进实现，`AI-01` 脚手架不依赖它 |
+| **B5 · 范围与工期裁决** | **待裁决**。`TASKS.md §工作量对账` 已自认 T1~T6 估算 ≈168 人天 vs 计划容量 80 人天（2.1 倍），A/B/C 三选项需人拍板；在此之前 AI 只能按"T3/T5 不可裁"的既有约束执行 |
 | **`.env.example` 与 compose 的中间件口令护栏** | 已登记为「未落地的约束」（`项目设计报告.md §9.10`），触发条件：首次部署到可被外网访问的环境前 |
 | **Nginx TLS** | 同上（443 目前是空映射） |
 | **Alembic 纳管既有 DDL** | `DEP-04` 明确留待 T1；基建已就位，`aids-backend/alembic/versions/README.md` 写了正确的纳管步骤 |

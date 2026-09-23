@@ -214,10 +214,17 @@ def parse_schema() -> dict[str, Table]:
                 table.pk = [c.strip().strip("`") for c in pk.group("cols").split(",") if c.strip()]
                 continue
             if key := _KEY.match(part):
-                cols = tuple(c.strip().strip("`") for c in key.group("cols").split(",") if c.strip())
+                cols = tuple(
+                    c.strip().strip("`") for c in key.group("cols").split(",") if c.strip()
+                )
                 cm = _COMMENT.search(key.group("rest"))
                 table.indexes.append(
-                    (key.group("name"), bool(key.group("unique")), cols, cm.group("text") if cm else None)
+                    (
+                        key.group("name"),
+                        bool(key.group("unique")),
+                        cols,
+                        cm.group("text") if cm else None,
+                    )
                 )
                 continue
             if part.upper().startswith(("CONSTRAINT", "CHECK")):
@@ -231,7 +238,8 @@ def parse_schema() -> dict[str, Table]:
                 table.columns.append(
                     Column(
                         name=col.group("name"),
-                        sql_type=col.group("type") + (f"({col.group('args')})" if col.group("args") else ""),
+                        sql_type=col.group("type")
+                        + (f"({col.group('args')})" if col.group("args") else ""),
                         unsigned=bool(col.group("unsigned")),
                         nullable="NOT NULL" not in rest.upper(),
                         default=dm.group(1) if dm else None,
@@ -267,9 +275,10 @@ def _skip_column(t: Table, c: Column) -> bool:
         return c.name == "update_time" or "CreateTimeMixin" in _mixin_list(t)
     if c.name == "deleted" and "SoftDeleteMixin" in _mixin_list(t):
         return True
-    if c.name == "version" and "OptimisticLockMixin" in _mixin_list(t):
-        return True
-    return False
+    # 刻意写成直接返回条件：`if cond: return True / return False` 会被 ruff 的
+    # SIM103 判为可简化。scripts/ 此前不在 CI 的 ruff 扫描面内（只扫 app/tests/aids-*），
+    # 而 pre-commit 的 ruff 钩子扫全仓 —— 于是 L1 会红、L2 却绿。现已把 scripts/ 纳入 CI。
+    return c.name == "version" and "OptimisticLockMixin" in _mixin_list(t)
 
 
 def _class_name(table: str) -> str:
@@ -343,10 +352,14 @@ def render_all() -> dict[str, str]:
 
     out: dict[str, str] = {}
     for prefix, fname in PREFIX_FILES.items():
-        body = "\n\n\n".join(_render_table(t) for t in sorted(grouped[prefix], key=lambda x: x.name))
+        body = "\n\n\n".join(
+            _render_table(t) for t in sorted(grouped[prefix], key=lambda x: x.name)
+        )
         out[fname] = HEADER.format(prefix=prefix) + "\n\n" + body + "\n"
 
-    imports = "\n".join(f"from app.models.{f[:-3]} import *  # noqa: F401,F403" for f in PREFIX_FILES.values())
+    imports = "\n".join(
+        f"from app.models.{f[:-3]} import *  # noqa: F401,F403" for f in PREFIX_FILES.values()
+    )
     out["__init__.py"] = (
         '"""ORM 模型汇总（**生成物**）。\n\n'
         "导入本包即让全部表注册进 `Base.metadata` —— Alembic autogenerate\n"
@@ -395,7 +408,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"schema.sql → {len(tables)} 张表")
         for name in sorted(tables):
             t = tables[name]
-            print(f"   {name:24s} {len(t.columns):2d} 列, {len(t.indexes)} 索引, mixins={','.join(_mixin_list(t)[1:]) or '-'}")
+            print(
+                f"   {name:24s} {len(t.columns):2d} 列, {len(t.indexes)} 索引, mixins={','.join(_mixin_list(t)[1:]) or '-'}"
+            )
 
     return write(rendered) if args.write else check(rendered)
 

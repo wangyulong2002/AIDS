@@ -135,8 +135,7 @@ def check() -> int:
 
     if not CONSTRAINTS.exists():
         print(
-            "[依赖约束] 缺少 constraints.txt\n"
-            "  修复：python3 scripts/gen_constraints.py --write",
+            "[依赖约束] 缺少 constraints.txt\n  修复：python3 scripts/gen_constraints.py --write",
             file=sys.stderr,
         )
         return 1

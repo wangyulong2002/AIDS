@@ -27,7 +27,7 @@ from app.core.errors import SUCCESS, CommonError, ProductError
 from app.core.exceptions import BusinessError
 from app.core.response import HTTP_STATUS_EXCEPTIONS
 
-pytestmark = pytest.mark.contract
+pytestmark = [pytest.mark.contract, pytest.mark.task("BE-01")]
 
 # 必须定义在模块级：文件顶部有 `from __future__ import annotations`，
 # 注解会变成字符串，FastAPI 用 get_type_hints 在**模块全局**里解析——

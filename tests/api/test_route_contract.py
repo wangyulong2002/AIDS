@@ -22,7 +22,7 @@ from aids_backend.api import MODULE_ROUTERS
 from aids_backend.app_factory import create_app
 from tests.contract._doc_parser import API_DOC
 
-pytestmark = pytest.mark.contract
+pytestmark = [pytest.mark.contract, pytest.mark.task("BE-01")]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = PROJECT_ROOT / "aids-backend"

@@ -37,7 +37,7 @@ from app.orm.optimistic import (
 from app.orm.pagination import InvalidPageError, Page, paginate
 from app.orm.soft_delete import ALIVE, DELETED, alive, include_deleted
 
-pytestmark = pytest.mark.invariant
+pytestmark = [pytest.mark.invariant, pytest.mark.task("BE-02")]
 
 
 # ---------------------------------------------------------------------

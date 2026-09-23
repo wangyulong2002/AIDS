@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -38,34 +39,80 @@ HOOKS_DIR = PROJECT_ROOT / "scripts" / "hooks"
 # Windows 的 CreateProcess 解析裸名 "bash" 时会先命中
 # `C:\Windows\System32\bash.exe`（WSL 启动器），而它可能在安全策略黑名单里 ——
 # 表现为一段 UTF-16 的「拒绝访问」，经 subprocess 文本解码后炸成
-# UnicodeDecodeError，看起来完全不像环境问题。用 which() 的结果可绕开这个陷阱。
-_BASH: str | None = shutil.which("bash")
+# UnicodeDecodeError，看起来完全不像环境问题。
+#
+# 但「用 which() 的结果」本身也是不够的：**同一个 WSL 启动器能从 cmd.exe 的
+# PATH 里胜出**（System32 在前）。此时 `bash -c true` 照常返回 0（它真去起了
+# WSL），可它读不到 `F:\AIDS\...` 这类 Windows 路径 —— 于是所有 hook 调用以
+# rc=127（command not found）失败，症状看起来像"护栏全坏了"，实为选错了 shell。
+# 故这里按优先级挑：Git for Windows 的 bash 优先，最后的 which() 结果兜底，
+# 并且探针与真实用法同构（让它读一次 hooks 目录里的脚本）。
 
 
-def _bash_unavailable_reason() -> str | None:
-    """探测 bash 是否**真的可执行**（which 有结果 ≠ 跑得起来）。
+def _bash_candidates() -> list[str]:
+    """按可靠性排序的 bash 候选（去重保序）。"""
+    candidates: list[str] = []
 
-    实测过的两种假阳性：
-        1. 裸名 "bash" 被解析到 WSL 启动器并被安全策略阻断（见上方注释）；
-        2. 受限沙箱禁止 Python 子进程启动 bash。
-    故此处实跑一次探针，失败即 skip —— 不把环境问题伪装成代码缺陷。
-    CI（ubuntu-latest）的 bash 正常，护栏断言照常生效。
+    for var in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+        base = os.environ.get(var)
+        if not base:
+            continue
+        for rel in ("Git/bin/bash.exe", "Git/usr/bin/bash.exe"):
+            path = Path(base) / rel
+            if path.is_file():
+                candidates.append(str(path))
+
+    for fixed in (r"C:\Program Files\Git\bin\bash.exe", "/bin/bash", "/usr/bin/bash"):
+        if Path(fixed).is_file():
+            candidates.append(fixed)
+
+    which = shutil.which("bash")
+    if which:
+        candidates.append(which)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        key = os.path.normcase(os.path.abspath(candidate))
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def _select_bash() -> tuple[str | None, str | None]:
+    """返回 (可用的 bash 绝对路径, 不可用原因)。
+
+    探针必须与真实用法同构：让候选 bash 去 `test -f` 一个 hooks 脚本。
+    只跑 `bash -c true` 会把 WSL 启动器判为可用（见上方注释）。
+    CI（ubuntu-latest）的 `/bin/bash` 正常，护栏断言照常生效。
     """
-    if _BASH is None:
-        return "本环境无 bash"
-    try:
-        probe = subprocess.run([_BASH, "-c", "true"], capture_output=True, timeout=30)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return f"bash 存在但无法启动：{exc!r}"
-    if probe.returncode != 0:
-        return f"bash 存在但执行失败（rc={probe.returncode}，stderr={probe.stderr[:60]!r}）"
-    return None
+    probe_script = str(HOOKS_DIR / "forbid_temp_files.sh")
+    last_error: str | None = "本环境无 bash"
+    for candidate in _bash_candidates():
+        try:
+            probe = subprocess.run(
+                [candidate, "-c", 'test -f "$1"', "bash", probe_script],
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            last_error = f"{candidate} 无法启动：{exc!r}"
+            continue
+        if probe.returncode == 0:
+            return candidate, None
+        last_error = (
+            f"{candidate} 读不到仓库里的 hook 脚本（rc={probe.returncode}）——"
+            f"多半是 WSL 启动器而非真正的 POSIX shell"
+        )
+    return None, last_error
 
 
-_BASH_UNAVAILABLE = _bash_unavailable_reason()
+_BASH, _BASH_UNAVAILABLE = _select_bash()
 
 pytestmark = [
     pytest.mark.invariant,
+    pytest.mark.task("BE-00"),
     pytest.mark.skipif(
         _BASH_UNAVAILABLE is not None,
         reason=f"护栏 hook 需要可执行的 bash（{_BASH_UNAVAILABLE}）",

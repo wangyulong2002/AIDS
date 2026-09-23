@@ -27,19 +27,24 @@
 # 1. Python 环境（基准解释器 3.11，与 pyright/pre-commit 的固定版本一致）
 python3.11 -m venv .venv
 .venv/bin/pip install -e ".[dev]"      # Windows: .venv\Scripts\pip
-# 注意：venv 不入库。Windows 上创建的 venv 在 Linux/WSL 里是废的
-#（只有 Include/ Lib/ Scripts/，没有 bin/），换系统须重建。
+# 注意：venv 不入库。Windows 上建的 venv 在 Linux/WSL 里是废的，反之亦然
+#（只有 Include/ Lib/ Scripts/ 或 bin/ 的差别），换系统须重建。
 
-# 2. 本地配置
+# 2. 环境自检（一条命令回答「本机现在能不能干活」）
+.venv/bin/python scripts/dev_env_check.py
+# 检查：解释器版本 / 跨系统 venv / WSL 跨盘访问 / 依赖齐备 /
+#       DATABASE_URL 是否连到生产库（S1-d）/ 四项一致性门禁 / 中间件容器。
+
+# 3. 本地配置
 cp .env.example .env                    # 按需修改
 
-# 3. pre-commit（本地门禁 L1）
+# 4. pre-commit（本地门禁 L1）
 .venv/bin/pre-commit install
 
-# 4. 跑测试（门禁核心）
+# 5. 跑测试（门禁核心）
 .venv/bin/pytest tests -q
 
-# 5. 中间件（Docker Compose，分档）
+# 6. 中间件（Docker Compose，分档）
 cd deploy && docker compose --profile minimal up -d
 ```
 
@@ -87,8 +92,9 @@ AIDS/
 │   ├── 工程化门禁方案.md        # ★ 本门禁体系的设计说明
 │   └── sql/                    # schema.sql / mock_schema.sql / seed.sql
 ├── aids-backend/               # ★ 主业务服务：aids_backend/（代码）+ alembic/（迁移）+ requirements.txt
-├── aids-ai/                    #   另两个服务目前只有依赖清单（未开工）
-├── aids-mock/                  #   └ 三份 requirements.txt 均由 pyproject.toml 生成
+├── aids-ai/                    #   AI 客服服务：aids_ai/（脚手架已就位，业务见 T5）
+├── aids-mock/                  #   Mock 渠道服务：aids_mock/（脚手架已就位，业务见 MOCK-01~04）
+│                               #   └ 三份 requirements.txt 均由 pyproject.toml 生成
 ├── constraints.txt             # 依赖版本快照（已验证的精确组合；CI/Docker 用 -c 引用）
 ├── deploy/                     # Docker Compose（9 服务分档）
 ├── scripts/hooks/              # pre-commit hook 脚本
@@ -106,14 +112,14 @@ AIDS/
 | 层 | 触发 | 内容 | 时长 |
 |---|---|---|---|
 | **L1** | pre-commit（本地） | 文档一致性门禁、ruff、敏感文件、残留文件、错误码扫描、枚举扫描 | < 5s |
-| **L2** | PR（GitHub Actions） | **文档一致性门禁（第一步）**、契约测试（真实 MySQL 8）、不变量测试、pyright | < 5min |
-| **L3** | merge 到 main | compose 最小档冒烟 | < 15min |
+| **L2** | PR（GitHub Actions） | **文档一致性门禁（第一步）**、契约测试（真实 MySQL 8）、不变量测试、pyright、**三服务镜像构建 + 容器探针** | < 10min |
+| **L3** | merge 到 main | **真拉起 compose 最小档**（MySQL/Redis/Nginx healthy + 38 表自检） | < 15min |
 
 > 文档一致性门禁（`docs/tools/gen_data_dictionary.py --check`，35 项）**必须是第一步**：
 > 它拦的是"文档与代码已经互相矛盾"这类结构性漂移，一旦漂移，后面的测试全绿也没有意义。
 > 它纯标准库实现，不需要装任何依赖，因此不会因为依赖问题被跳过。
 
-### 八类契约测试
+### 十二类契约测试
 
 | # | 文档事实 | 测试文件 | 失败即 |
 |---|---|---|---|
@@ -125,6 +131,10 @@ AIDS/
 | C6 | 幂等键 6 种规则 | `test_stock_invariants.py` | 重复扣减 |
 | C7 | 统一响应 `{code,message,data}` | `test_response_envelope.py` | 前端拦截器失配 |
 | C8 | 4 类 UNIQUE 索引 | `test_unique_indexes.py` | 重复发货/刷评价 |
+| C9 | `app/models/` ← `schema.sql` | `test_orm_matches_schema.py` | 生成器解析错而 `--check` 全绿 |
+| C10 | 已验收任务必须有对应测试 | `test_task_coverage.py` | 「任务已完成」只是一句文档 |
+| C11 | 部署产物 ↔ 真实文件系统 | `test_deploy_artifacts.py` | `docker build` 才炸（f309978 事故） |
+| C12 | 三服务骨架与工具链登记 | `test_service_skeletons.py` | 新服务从未被探活/从未被检查 |
 
 ### 核心设计：单一定义 + 反向校验
 
@@ -148,6 +158,15 @@ pytest tests -q
 
 # 只跑契约测试（门禁核心，无需 DB）
 pytest tests/contract -q -m contract
+
+# 任务验收门禁：TASKS.md 里 ✅ 的代码类任务必须有 @pytest.mark.task("<任务号>") 的测试
+pytest tests/contract/test_task_coverage.py -q
+
+# 服务镜像：真的构建 + 真跑容器打探针（CI 的 images job 跑的就是这三条）
+docker build -f deploy/app/backend.Dockerfile -t aids/backend:dev .
+docker build -f deploy/app/ai.Dockerfile      -t aids/ai:dev .
+docker build -f deploy/app/mock.Dockerfile    -t aids/mock:dev .
+docker run -d --rm -e APP_ENV=development -p 18099:8080 aids/backend:dev  # 然后 curl :18099/health
 
 # 需要真实 MySQL 的反射测试
 DATABASE_URL=mysql+asyncmy://... pytest tests/contract -q -m requires_mysql

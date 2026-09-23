@@ -3,8 +3,8 @@
 #
 # 设计见 docs/工程化门禁方案.md：
 #   L1 pre-commit（本地，< 5s）—— 见 .pre-commit-config.yaml
-#   L2 PR（本文件 lint / contract / typecheck，< 5min）
-#   L3 merge 到 main（smoke，< 15min）
+#   L2 PR（本文件 docs / lint / contract / invariants / typecheck / images，< 10min）
+#   L3 merge 到 main（smoke：真拉起最小档 compose，< 15min）
 #
 # 核心思想：约束产出（代码能不能过检查），而非约束输入（AI 读没读文档）。
 # =============================================================
@@ -79,13 +79,15 @@ jobs:
         run: pip install -c constraints.txt "ruff>=0.8"
 
       - name: ruff format 检查
-        # `app` 是共享契约层；`aids-*` 是服务包源码目录
-        # （aids-backend/aids_backend 等）。曾经只写 `app tests`，
-        # BE-01 新增的服务代码完全不在检查范围内。
-        run: ruff format --check app tests aids-*
+        # `app` 是共享契约层；`aids-*` 是服务包源码目录（aids-backend/aids_backend 等）；
+        # `scripts/` 是四个生成器与环境自检脚本。
+        # 曾经只写 `app tests`，BE-01 新增的服务代码完全不在检查范围内；
+        # `scripts/` 同理长期只在 pre-commit（扫全仓）里被检查，于是出现
+        # 「L1 红、L2 绿」的错位 —— 两侧扫描面必须一致才谈得上门禁。
+        run: ruff format --check app tests aids-* scripts
 
       - name: ruff lint
-        run: ruff check app tests aids-*
+        run: ruff check app tests aids-* scripts
 
       - name: C4 错误码扫描（禁止硬编码错误码）
         # 不传目录参数 = 使用 tests/contract/_targets.py 的默认扫描面
@@ -243,26 +245,115 @@ jobs:
         run: .venv/bin/pyright
 
   # ---------------------------------------------------------------
-  # L3 冒烟：仅 main 分支，起 compose 最小档跑关键链路
+  # L2-e 服务镜像构建 + 容器冒烟
   #
-  # 当前 0 业务代码，暂以占位实现（只验证 compose 可拉起）。
-  # T1 起替换为真实链路：登录 → 下单 → 支付回调。
+  # 为什么单列一个 job（真实事故）：
+  #   三个服务镜像此前**从未端到端构建过**——compose 的 9 个服务全是中间件，
+  #   不含 backend/ai/mock；smoke job 只跑 `docker compose config`；文档门禁
+  #   只比对 Dockerfile 文本里的 EXPOSE 端口。于是「COPY 指向不存在的目录」
+  #   「CMD 的模块名写错」「依赖装不上」都能长期潜伏，直到部署当天才炸。
+  #
+  # 这里做两件事：真的 `docker build`，再把容器跑起来打 `/health`。
+  # 构建用矩阵并行，墙钟时间约等于单个镜像。
+  # ---------------------------------------------------------------
+  images:
+    name: Images (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [lint]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            dockerfile: deploy/app/backend.Dockerfile
+            port: 8080
+          - service: ai
+            dockerfile: deploy/app/ai.Dockerfile
+            port: 8000
+          - service: mock
+            dockerfile: deploy/app/mock.Dockerfile
+            port: 8081
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像（构建上下文 = 仓库根，与本地命令逐字相同）
+        run: docker build -f ${{ matrix.dockerfile }} -t aids/${{ matrix.service }}:ci .
+
+      - name: 容器冒烟（探针必须在 60s 内返回 code=0）
+        # 只 build 不 run 是不够的：CMD 的模块路径、gunicorn 与 uvicorn worker 的
+        # 组合、探针路径只要有一处对不上，容器就是"能构建、起不来"。
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke-${{ matrix.service }} \
+            -e APP_ENV=development \
+            -p ${{ matrix.port }}:${{ matrix.port }} \
+            aids/${{ matrix.service }}:ci
+          for _ in $(seq 1 30); do
+            if curl -sf "http://127.0.0.1:${{ matrix.port }}/health" -o /tmp/body.json; then
+              cat /tmp/body.json
+              grep -q '"code":0' /tmp/body.json
+              echo "${{ matrix.service }} 探针通过"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${{ matrix.service }} 容器 60s 内未通过探针"
+          docker logs smoke-${{ matrix.service }} || true
+          exit 1
+
+      - name: 失败时输出容器日志
+        if: failure()
+        run: docker logs smoke-${{ matrix.service }} || true
+
+      - name: 清理容器
+        if: always()
+        run: docker rm -f smoke-${{ matrix.service }} || true
+
+  # ---------------------------------------------------------------
+  # L3 冒烟：仅 main 分支，真拉起 compose 最小档
+  #
+  # 应用服务的端到端链路（登录 → 下单 → 支付回调）待 T3 补齐后替换；
+  # 当前验证的是"中间件编排与数据库初始化真的可用"——这部分在 T0 只被
+  # `docker compose config`（纯解析，不拉起）覆盖过。
   # ---------------------------------------------------------------
   smoke:
     name: Smoke (compose 最小档)
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    needs: [lint, contract, invariants]
+    needs: [lint, contract, invariants, images]
     steps:
       - uses: actions/checkout@v4
 
       - name: 校验 compose 配置可解析
         run: docker compose -f deploy/docker-compose.yml config > /dev/null
 
-      - name: 提示（待 T1 接入真实冒烟链路）
+      - name: 拉起最小档（MySQL + Redis + Nginx）并等待 healthy
+        run: docker compose -f deploy/docker-compose.yml up -d --build --wait mysql redis nginx
+
+      - name: Nginx 探针
+        run: curl -sf http://127.0.0.1/healthz
+
+      - name: 数据库初始化自检（必须 38 表）
+        # 与 contract job 同一判据：mysql 客户端不展开 SQL 里的 ${VAR}，
+        # 静默建错库比直接失败更难查，故用表数自检兜底。
         run: |
-          echo "::notice::当前为 T0 阶段（0 业务代码），冒烟仅校验 compose 配置。"
-          echo "::notice::T1 完成后应替换为：拉起最小档 → 登录 → 下单 → 支付回调。"
+          set -euo pipefail
+          n=$(docker exec aids-mysql mysql -uroot -paids_root_2026 -N -B -e \
+            "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='aids_shop';")
+          echo "aids_shop 表数 = $n"
+          if [ "$n" != "38" ]; then
+            echo "::error::期望 38 张表，实际 $n —— 数据库初始化未完整执行。"
+            exit 1
+          fi
+
+      - name: 提示（待 T3 接入应用链路）
+        run: |
+          echo "::notice::当前冒烟覆盖：中间件编排 + 数据库初始化 + 三服务镜像构建与探针。"
+          echo "::notice::T3 完成后应替换为：登录 → 下单 → 支付回调。"
+
+      - name: 收尾
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml down -v || true
 
   # ---------------------------------------------------------------
   # 门禁汇总（供分支保护规则引用）
@@ -270,7 +361,7 @@ jobs:
   gate:
     name: 门禁汇总
     if: always()
-    needs: [docs, lint, contract, invariants, typecheck]
+    needs: [docs, lint, contract, invariants, typecheck, images]
     runs-on: ubuntu-latest
     steps:
       - name: 检查所有门禁任务
