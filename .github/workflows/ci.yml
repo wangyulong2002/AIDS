@@ -37,7 +37,7 @@ jobs:
   # 自动化里**，33 项检查只有在人记得手敲命令时才跑。
   # ---------------------------------------------------------------
   docs:
-    name: Consistency (文档 33 项 + 依赖清单)
+    name: Consistency (文档 35 项 + 依赖清单)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +51,9 @@ jobs:
 
       - name: 依赖清单一致性（aids-*/requirements.txt ← pyproject.toml）
         run: python3 scripts/gen_requirements.py --check
+
+      - name: 依赖快照一致性（constraints.txt 覆盖 pyproject 全部直接依赖）
+        run: python3 scripts/gen_constraints.py --check
 
   # ---------------------------------------------------------------
   # L2-a 代码风格与静态检查
@@ -68,7 +71,7 @@ jobs:
       - name: 安装依赖
         # 扫描器只用标准库（ast/re/pathlib），ruff 是唯一需要安装的——
         # 刻意保持"零项目依赖"，这样"装不上依赖"永远不是本 job 失败的原因。
-        run: pip install "ruff>=0.8"
+        run: pip install -c constraints.txt "ruff>=0.8"
 
       - name: ruff format 检查
         # `app` 是共享契约层；`aids-*` 是服务包源码目录
@@ -128,7 +131,7 @@ jobs:
       - name: 安装依赖
         # 依赖清单只有 pyproject.toml 一处（含 pymysql —— 反射层测试要用它）。
         # 不在这里另写一份包名列表，避免"CI 装的和本地装的不一样"。
-        run: pip install -e ".[dev]"
+        run: pip install -c constraints.txt -e ".[dev]"
 
       - name: 载入 DDL（真实建表）
         # 为什么用 root 而不是应用账号 aids：
@@ -194,7 +197,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 安装依赖
-        run: pip install -e ".[dev]"
+        run: pip install -c constraints.txt -e ".[dev]"
 
       - name: 库存/幂等/退款/优惠券不变量
         run: pytest tests/invariants -q -m invariant
@@ -222,7 +225,7 @@ jobs:
         #（"环境没装"伪装成"类型错误"，真假问题混在一起）。
         run: |
           python -m venv .venv
-          .venv/bin/pip install -e ".[dev]"
+          .venv/bin/pip install -c constraints.txt -e ".[dev]"
 
       - name: pyright（basic 档）
         # 用仓库自己的 pyright（pyproject [dev] 已声明版本），

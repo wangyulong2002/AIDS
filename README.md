@@ -80,9 +80,11 @@ AIDS/
 ├── aids-backend/               # 三服务镜像的依赖清单（由 pyproject.toml 生成）
 ├── aids-ai/                    #   └ 对应 deploy/app/{backend,ai,mock}.Dockerfile
 ├── aids-mock/                  #      的构建上下文
+├── constraints.txt             # 依赖版本快照（已验证的精确组合；CI/Docker 用 -c 引用）
 ├── deploy/                     # Docker Compose（9 服务分档）
 ├── scripts/hooks/              # pre-commit hook 脚本
 ├── scripts/gen_requirements.py # 依赖清单生成器 + 一致性门禁
+├── scripts/gen_constraints.py  # 依赖快照生成器 + 一致性门禁
 ├── .pre-commit-config.yaml     # 门禁 L1
 └── .github/workflows/ci.yml    # 门禁 L2/L3
 ```
@@ -97,7 +99,7 @@ AIDS/
 | **L2** | PR（GitHub Actions） | **文档一致性门禁（第一步）**、契约测试（真实 MySQL 8）、不变量测试、pyright | < 5min |
 | **L3** | merge 到 main | compose 最小档冒烟 | < 15min |
 
-> 文档一致性门禁（`docs/tools/gen_data_dictionary.py --check`，33 项）**必须是第一步**：
+> 文档一致性门禁（`docs/tools/gen_data_dictionary.py --check`，35 项）**必须是第一步**：
 > 它拦的是"文档与代码已经互相矛盾"这类结构性漂移，一旦漂移，后面的测试全绿也没有意义。
 > 它纯标准库实现，不需要装任何依赖，因此不会因为依赖问题被跳过。
 
@@ -154,9 +156,11 @@ python -m tests.contract.scan_enum_magic_numbers app
 # 启动断言（模拟生产启动）
 APP_ENV=production SECRET_KEY=xxx python -m app.core.config
 
-# 依赖清单（唯一来源是 pyproject.toml，三份清单是派生物）
-python3 scripts/gen_requirements.py --write     # 改完 pyproject.toml 后重新生成
+# 依赖（唯一声明来源是 pyproject.toml，清单与快照都是派生物）
+python3 scripts/gen_requirements.py --write     # 改完 pyproject.toml 后重新生成三份清单
 python3 scripts/gen_requirements.py --check     # 校验（pre-commit 与 CI 跑的就是这条）
+python3 scripts/gen_constraints.py --write      # 依赖升级后重刷版本快照（在跑通 pytest 的环境里）
+python3 scripts/gen_constraints.py --check      # 校验快照覆盖 pyproject 全部直接依赖
 ```
 
 ---
@@ -173,11 +177,18 @@ python3 scripts/gen_requirements.py --check     # 校验（pre-commit 与 CI 跑
 | 新增 UNIQUE 索引 | `DATA-DICTIONARY.md` §四 | C8 |
 | 改统一响应结构 | `API.md` §1.1 | C7 |
 | 改不变量规则 | `DATA-DICTIONARY.md` §四 | C3/C5/C6 |
-| 依赖增删/升级 | 只改 `pyproject.toml`，再跑 `scripts/gen_requirements.py --write` | pre-commit `requirements-sync` + CI consistency |
+| 依赖增删/升级 | 只改 `pyproject.toml`，再跑 `scripts/gen_requirements.py --write` 与 `scripts/gen_constraints.py --write` | pre-commit `requirements-sync` / `constraints-check` + CI consistency |
 
-> **依赖只有一处来源**：`pyproject.toml`。`aids-backend/`、`aids-ai/`、`aids-mock/`
+> **依赖只有一处声明来源**：`pyproject.toml`。`aids-backend/`、`aids-ai/`、`aids-mock/`
 > 三个目录里的 `requirements.txt` 是**生成物**（Dockerfile 构建时要拷的文件），
 > 手工编辑会被 pre-commit 与 CI 同时拦下。
+>
+> **版本由 `constraints.txt` 锁定**：`requirements.txt` 管「装什么」（`>=` 范围），
+> `constraints.txt` 管「装哪个版本」（`==` 快照）。CI 与 Dockerfile 用
+> `pip install -c constraints.txt …` 消费它 —— 用 `-c` 而不是 `-r`，是为了让
+> 平台专属依赖（如 Linux 上的 `uvloop`）不被 Windows 生成的快照漏装。
+> 起因：`fastapi 0.14x` 改了 `include_router` 的返回结构（惰性 `_IncludedRouter`），
+> 直接让两处依赖 `app.routes` 的契约测试假阴性 —— 依赖漂移的代价已经真实发生过。
 
 ---
 

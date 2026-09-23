@@ -321,23 +321,43 @@ ALLOW = ("v1.1", "v1.2", "v1.3", "替代", "移除", "已删除", "归档", "去
 ARCHIVE_HEAD = ("附录", "历史实测", "归档", "修订", "沿革", "与 v1.1 的差异", "差异")
 
 
+def _env_keys(path: Path) -> list[str]:
+    """取 .env 文件里定义的键（跳过空行与注释行；保留重复项供上层检测）。"""
+    return [ln.split("=", 1)[0].strip() for ln in read(path).splitlines()
+            if ln.strip() and not ln.strip().startswith("#") and "=" in ln]
+
+
 def check_env_hygiene(r: Reporter) -> None:
     r.section("环境变量卫生")
     for name in (".env", ".env.example"):
         p = DEPLOY / name
         if not p.exists():
-            r.fail(f"缺少 {name}")
+            r.fail(f"缺少 deploy/{name}")
             continue
-        keys = [ln.split("=", 1)[0].strip() for ln in read(p).splitlines()
-                if ln.strip() and not ln.strip().startswith("#") and "=" in ln]
+        keys = _env_keys(p)
         dups = sorted({k for k in keys if keys.count(k) > 1})
         # 同名键在 .env 里后者静默覆盖前者：改上面「端口」段的值会被下面应用段悄悄盖掉
         r.eq(f"{name} 无重复定义的键", dups, [])
+
+    # ---- 应用侧权威命名（仓库根 .env.example），§9.6 ----
+    # 这份文件长期不在任何门禁覆盖内，于是"根改名、编排层没跟上"这类漂移
+    # 不会被任何检查抓到 —— 直到 production 因 S1-c 缺必需 Key 直接启动失败。
+    # 断言方向：根的键必须被 deploy 全部包含（deploy 允许有编排专属的额外键）。
+    root_example = ROOT / ".env.example"
+    if not root_example.exists():
+        r.fail("缺少仓库根 .env.example（应用侧变量的权威命名）")
+    else:
+        root_keys = _env_keys(root_example)
+        root_dups = sorted({k for k in root_keys if root_keys.count(k) > 1})
+        r.eq("根 .env.example 无重复定义的键", root_dups, [])
+
+        deploy_defined = set(_env_keys(DEPLOY / ".env.example"))
+        undeclared = sorted(set(root_keys) - deploy_defined)
+        r.eq("根 .env.example 的键在 deploy/.env.example 中均有定义", undeclared, [])
+
     compose = read(COMPOSE)
     refs = set(re.findall(r"\$\{([A-Z0-9_]+)(?::-[^}]*)?\}", compose))
-    example = read(DEPLOY / ".env.example")
-    defined = {ln.split("=", 1)[0].strip() for ln in example.splitlines()
-               if ln.strip() and not ln.strip().startswith("#") and "=" in ln}
+    defined = set(_env_keys(DEPLOY / ".env.example"))
     missing = sorted(refs - defined)
     r.eq("compose 引用的变量在 .env.example 中均有定义", missing, [])
 

@@ -96,3 +96,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^(pyproject\.toml|aids-[a-z]+/requirements\.txt|scripts/gen_requirements\.py)$
+
+      - id: constraints-check
+        name: "依赖快照一致性（constraints.txt 须覆盖 pyproject 全部直接依赖）"
+        # requirements.txt 管"装什么"（声明），constraints.txt 管"装哪个版本"（快照）。
+        # 新增/升级依赖后忘记重跑 --write，会让 CI 与本地装到不同版本。
+        entry: python3 scripts/gen_constraints.py --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|constraints\.txt|scripts/gen_constraints\.py)$

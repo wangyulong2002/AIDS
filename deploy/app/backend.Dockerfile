@@ -20,8 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential gcc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY aids-backend/requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+# constraints.txt（仓库根）是已验证的版本快照；用 -c 只约束版本、不限定安装集合
+COPY aids-backend/requirements.txt constraints.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt -c constraints.txt
 
 # ---------- 运行阶段 ----------
 FROM python:3.11-slim

@@ -143,3 +143,48 @@ class TestScannerCoverage:
             f"{module}._default_targets() 与 _targets.scan_targets() 不一致；"
             f"新增服务时会出现「C4 扫得到、C2 扫不到」的静默缺口。"
         )
+
+
+class TestBuildContextHygiene:
+    """构建上下文卫生。
+
+    构建上下文是整个仓库根（deploy 下各 Dockerfile 的 context 均为 `..`）。
+    没有 .dockerignore 时，约 200MB 的 .venv/ 与 .git/ 会被逐次打包传给 daemon：
+    构建无谓变慢，且 .env / 私钥存在被 COPY 进镜像的风险。
+    """
+
+    _REQUIRED_PATTERNS = (".venv/", ".git/", ".env", "*.pem", "*.key")
+
+    def test_dockerignore_excludes_heavy_and_secret_paths(self) -> None:
+        ignore = PROJECT_ROOT / ".dockerignore"
+        assert ignore.is_file(), (
+            "缺少 .dockerignore：构建上下文是整个仓库根，"
+            ".venv/（约 200MB）与 .env 会被逐次打包传给 docker daemon"
+        )
+        patterns = {
+            line.strip()
+            for line in ignore.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        missing = [p for p in self._REQUIRED_PATTERNS if p not in patterns]
+        assert not missing, (
+            f".dockerignore 未排除 {missing} —— 它们会进构建上下文"
+            f"（.env / 私钥被 COPY 进镜像即密钥泄露）"
+        )
+
+    def test_does_not_ignore_paths_needed_by_dockerfiles(self) -> None:
+        """反向保护：Dockerfile 真正需要的源不能被排除，否则构建直接失败。"""
+        ignore = PROJECT_ROOT / ".dockerignore"
+        if not ignore.is_file():
+            return
+        text = ignore.read_text(encoding="utf-8")
+
+        # deploy/mysql/Dockerfile 依赖 docs/sql/；约束文件与依赖清单在仓库根
+        for pattern, why in (
+            (r"^docs/?$", "deploy/mysql/Dockerfile 需要 COPY docs/sql/"),
+            (r"^constraints\.txt$", "deploy/app/*.Dockerfile 需要 COPY constraints.txt"),
+            (r"^aids-[a-z]+/?$", "deploy/app/*.Dockerfile 需要 COPY aids-*/ 下的源码与清单"),
+        ):
+            assert not re.search(pattern, text, re.M), (
+                f".dockerignore 排除了 {pattern!r}，但 {why} —— 镜像会因源不存在而构建失败"
+            )

@@ -1,0 +1,59 @@
+# =============================================================
+# Docker 构建上下文排除清单
+#
+# 构建上下文是整个**仓库根**（deploy 下各 Dockerfile 的 context 均为 ..）。
+# 没有本文件时，.venv/（约 200MB）与 .git/ 会被逐次打包传给 daemon——
+# 构建无谓变慢，且 .env / 私钥存在被误 COPY 进镜像的风险。
+#
+# 注意：本文件只影响「传给 daemon 的上下文」，不改变 Dockerfile 的 COPY 语义。
+# Dockerfile 需要 COPY 的源必须仍在上下文内 —— 例如 deploy/mysql/Dockerfile
+# 需要 docs/sql/，故这里**有意不排除 docs/**。
+# =============================================================
+
+# ---- 虚拟环境与 Python 产物（最大头）----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# ---- 工具缓存 ----
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- 版本控制 ----
+.git/
+
+# ---- 本地配置与密钥（S7：绝不进镜像）----
+.env
+deploy/.env
+*.pem
+*.key
+secrets/
+
+# ---- 本地数据 / 日志 / 工作区 ----
+*.log
+logs/
+data/
+uploads/
+*.db
+*.sqlite3
+.workbuddy/
+
+# ---- 前端构建产物 ----
+node_modules/
+web/**/dist/
+admin/**/dist/
+
+# ---- 编辑器与 OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
