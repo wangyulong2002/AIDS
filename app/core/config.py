@@ -242,6 +242,16 @@ def get_redis_url() -> str:
     return os.getenv("REDIS_URL", "").strip()
 
 
+def get_internal_service_token() -> str:
+    """服务间静态 Token（BE-06，键名见根 .env.example）。空串 = 未配置。"""
+    return os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
+
+
+def get_internal_sign_secret() -> str:
+    """服务间请求签名密钥（BE-06）。空串 = 未配置。"""
+    return os.getenv("INTERNAL_SIGN_SECRET", "").strip()
+
+
 # =====================================================================
 # 统一入口
 # =====================================================================

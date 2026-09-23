@@ -12,17 +12,16 @@
 | 项 | 值 |
 |---|---|
 | 阶段 | **T0 完成 → T1 进行中** |
-| 已勾选任务 | DOC-01~03、DEP-01~04、BE-00~**BE-05** |
-| **下一个任务** | **BE-06 内部服务接口**（T1 最后一项；完成后 T1 出口对账） |
-| 测试基线 | 无 DB：`705 passed / 5 skipped`；有 DB：**`710 passed / 0 skipped`** |
+| 已勾选任务 | DOC-01~03、DEP-01~04、**BE-00~BE-06（T1 的 BE 线收官）** |
+| **下一个任务** | T1 剩余 6 项：**MOCK-01~03 / FE-01~02 / AI-01**；全部完成后做 **T1 出口对账** |
+| 测试基线 | 无 DB：`722 passed / 5 skipped`；有 DB：**`727 passed / 0 skipped`** |
 | 门禁 | 文档一致性 35 项 PASS；`ruff`（含 `scripts/`）+ `pyright` 0 errors；3 个生成器 `--check` 全绿 |
 | 镜像 | **三个服务镜像已端到端验证**：build 成功 + 容器起得来 + `/health` 返回 `code=0`（见 §4.1） |
 | 仓库规模 | ≈110 个受跟踪文件（含本次新增）；服务包 3 个（backend / ai / mock 骨架齐备） |
 | 远端 | `main` 与 `origin/main` 一致（`df60f82`），无未推送 |
 
-**业务代码量：T1 首块已落地。** 地基（门禁 + 契约测试 + ORM 基建 + 38 表模型 + 三服务骨架）之外，
-已有 BE-03 鉴权内核（JWT 双 Token / RS256 / JWKS / Refresh 轮换与吊销 / 依赖注入拦截）。
-其余仍是分组占位，BE-04 是下一块。
+**业务代码量：T1 的 BE 线已收官。** 鉴权（BE-03）/ 数据权限（BE-04）/ 通用组件（BE-05）/
+内部服务接口（BE-06）均已落地；MOCK / FE / AI 三线各剩脚手架与首批业务。
 
 ### 0.1 上一轮修复的三个前置条件（B1/B2/B3）
 
@@ -292,27 +291,35 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 
 ---
 
-## 5. 下一步：BE-06 内部服务接口
+## 4.5 本轮（2026-09-23 第六轮）：BE-06 内部服务接口
 
-**验收原文**（`docs/TASKS.md`）：
-
-> 供 AI 服务调用的订单/商品/用户查询接口；服务间静态 Token + 请求签名
-> （timestamp+nonce 防重放）+ 内网网段限制；**返回数据须脱敏**（手机号、详细地址）。
-> 依赖 BE-03, BE-04
-
-开工前建议先读：
-
-| 事实 | 说明 |
+| 文件 | 职责 |
 |---|---|
-| `docs/API.md` §四 | 内部服务接口的路径、鉴权与脱敏要求**已定稿**（主业务 ↔ AI 服务） |
-| `docs/PRD.md` §5.3 | 服务间通信约定：静态 Token + 签名算法（timestamp+nonce 防重放）+ 内网网段限制 |
-| `app/core/security.py` | 那是**用户 JWT** 的依赖注入；内部接口是另一套（服务间静态 Token + 签名），**不要混用** |
-| `app/core/jwt.py` / JWKS | AI 服务验用户 JWT 走 JWKS 端点，与服务间鉴权正交 |
-| `app/core/trace.py` | 内部调用的消息头同样要透传 traceId |
-| `.env.example` | 已有 `INTERNAL_SERVICE_TOKEN` / `INTERNAL_SIGN_SECRET` —— 配置名有权威来源，直接复用 |
+| `app/core/service_auth.py` | 服务间鉴权内核：四件套请求头（`X-Internal-Token/X-Timestamp/X-Nonce/X-Sign`）、**HMAC-SHA256 签名**（规范化串 `timestamp\n + nonce`，换行分隔防拼接歧义——此前 API.md 未定义，本轮补入文档）、±300s 时间窗、**nonce 原子登记**（Redis `SET NX EX` / 进程内降级，防并发重放）、内网网段限制（私有网段白名单；解析不出 IP 视为不可信，测试可单独覆盖该依赖） |
+| `aids-backend/aids_backend/api/internal.py` | 5 个查询接口：`/internal/order/list`（含 items 聚合）、`/internal/order/{orderNo}`、`/internal/order/{orderNo}/trace`（未发货返回**空轨迹**——对 AI 是正常答案）、`/internal/refund/{refundNo}`、`/internal/product/{spuId}`。**脱敏**：`receiver_phone` 密文永不返回、`receiver_addr` 只回省市区 + 掩码 |
+| `tests/api/test_internal_service.py` | 16 条：四件套失败路径全 403/10003、**nonce 重放必拒**、时间窗、签名绑定 secret/timestamp/nonce、订单列表与详情契约、脱敏断言、内网限制单测 |
 
-**T1 出口对账**：BE-06 完成 = T1 收官。按 `TASKS.md §工作量对账「决策记录」` 回来对一次账
-（T1 实测人天 vs 估算 21.5 人天），裁决是否触发分级裁剪。
+**信任边界（本任务最重要的文档化）**：`userId` 在内部接口里是**业务入参**（AI 服务从其用户的
+JWT 解出后传入，PRD §9.3「禁止从对话内容中提取」），不是凭据——信任边界是服务间鉴权。
+用户 JWT（`app/core/security.py`）与服务间鉴权（`app/core/service_auth.py`）**两套正交，不得混用**。
+
+**验证**：`task_runner verify` 8/8 PASS；pytest `722/5`（无 DB）、`727/0`（带库）；pyright 0 errors。
+
+---
+
+## 5. 下一步：T1 收官（剩余 6 项）+ 出口对账
+
+| 任务 | 内容 | 依赖 |
+|------|------|------|
+| MOCK-01 | Mock 支付网关：统一下单 / 沙箱收银台 / 回调 / 查询 / 退款 / T+1 对账；`PaymentChannel` 抽象 | DEP-01 |
+| MOCK-02 | Mock 短信服务（发送 / 验证码回显 / 频控；`app/core/sms.py` 的接入点） | DEP-01 |
+| MOCK-03 | Mock 物流服务（运单 / 轨迹推进 / 查询） | DEP-01 |
+| FE-01 | 前端工程脚手架（Vite + Vue3 + TS + Pinia；商城 / 管理后台两个工程） | DEP-02 |
+| FE-02 | 请求封装（axios 拦截器、JWT 无感刷新并发队列）—— BE-03 已解锁 | FE-01, BE-03 |
+| AI-01 | AI 服务脚手架——骨架已在（BE-04 期间为镜像构建落地），剩**结构化日志**与配置隔离差量 | DEP-02 |
+
+**出口对账（决策记录的触发点）**：以上 6 项完成后 T1 收官，按 `TASKS.md §工作量对账「决策记录」`
+对一次账：实测人天 vs 估算 21.5 人天 → ≤50% 维持全量 / 50~80% 砍第 1 档 / >80% 砍至第 3 档并重新裁决。
 
 **收尾动作（每个任务都一样，C10 门禁会拦）**：把 `TASKS.md` 里该任务勾成 ✅ 之前，
 先给覆盖其验收标准的测试加 `pytestmark = [..., pytest.mark.task("<任务号>")]`。

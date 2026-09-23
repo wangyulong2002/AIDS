@@ -597,6 +597,9 @@ Query: status（可多值，如 status=10,20）, pageNum, pageSize
 
 > 前缀 `/api/internal`，**不经过 Nginx 对外暴露**，仅内网可达。
 > 鉴权：`X-Internal-Token`（环境变量下发的静态 Token）+ `X-Timestamp` + `X-Nonce` + `X-Sign`（HMAC 防重放）。
+> **签名算法（BE-06 定稿）**：`X-Sign = HMAC-SHA256(INTERNAL_SIGN_SECRET, "{X-Timestamp}\n{X-Nonce}")`
+> （hex 小写；规范化串用换行分隔防拼接歧义）。时间偏差超过 **±300s** 拒绝；`X-Nonce` 在窗口内
+> **一次性**（服务端原子登记，重复即判重放）。鉴权失败一律 **403 + 10003**，不区分具体原因（不给探测者反馈）。
 
 | 方法 | 路径 | 调用方 | 说明 |
 |------|------|--------|------|

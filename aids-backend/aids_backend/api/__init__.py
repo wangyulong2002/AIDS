@@ -13,21 +13,32 @@
     | pay       | /payment   | API.md §2.5     |
     | marketing | /coupon    | API.md §2.7     |
     | admin     | /admin     | API.md §3.1~3.5 |
+    | internal  | /internal  | API.md §四（BE-06，仅内网） |
 
 本映射由 `tests/api/test_route_contract.py` 断言。改前缀必须同步改文档与测试
 两处——否则会出现「文档写 /coupon、代码挂 /marketing」这类漂移，前端联调时
 才发现（bysj 的典型故障）。
 
 尚未建立分组的路径（按 TASKS 由后续任务补齐，勿在此臆造）：
-    /cart、/refund、/review、/category、/home、/message、
-    /internal（BE-06 内部服务接口）、/api/ai（AI 服务）
+    /cart、/refund、/review、/category、/home、/message、/api/ai（AI 服务）
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
-from aids_backend.api import admin, auth, health, jwks, marketing, order, pay, product, user
+from aids_backend.api import (
+    admin,
+    auth,
+    health,
+    internal,
+    jwks,
+    marketing,
+    order,
+    pay,
+    product,
+    user,
+)
 
 api_router = APIRouter()
 
@@ -40,6 +51,7 @@ api_router.include_router(order.router)
 api_router.include_router(pay.router)
 api_router.include_router(marketing.router)
 api_router.include_router(admin.router)
+api_router.include_router(internal.router)
 
 # 业务模块路由（不含 health / jwks：前者是探针，后者是标准发现文档）。
 # 单独登记成注册表，供契约测试断言「模块 ↔ 前缀」不被静默改动——
@@ -52,4 +64,5 @@ MODULE_ROUTERS: dict[str, APIRouter] = {
     "pay": pay.router,
     "marketing": marketing.router,
     "admin": admin.router,
+    "internal": internal.router,
 }
