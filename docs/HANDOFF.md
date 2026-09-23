@@ -148,6 +148,12 @@ sed 's/`aids_shop`/`aids_shop_test`/g' docs/sql/schema.sql \
 
 ## 3. 本机环境特有的坑（新会话必读，可省数小时）
 
+> **执行环境（2026-09-23 起）**：IDE 默认终端已切为 **Command Prompt（cmd）**，AI 会话的命令
+> 直接在 Windows 侧原生执行（`git config core.autocrlf=true`）。此前 BE-05 提交时的行尾翻转
+> 反复拦截（§6）即源于 WSL git（未设 autocrlf）与 Windows git 混用 —— 新会话**禁止**再经 WSL
+> （`/mnt/f`、`wsl.exe`）执行任何仓库操作；脚本内确需调 bash 时用 `shutil.which("bash")` 的
+> 绝对路径（见 `tests/invariants/test_guard_selfcheck.py` 的处理）。
+
 ### 3.1 git
 
 | 现象 | 原因 / 对策 |
