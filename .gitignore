@@ -43,6 +43,12 @@ logs/
 # ---- 修复产物备份（防误提交）----
 docs/_P0修复产物/_backup_*/
 
+# ---- AI 工作目录（WorkBuddy）----
+# memory/ 是 AI 每次工作都会追加写入的日志 —— 入库会让每次对话都产生一个待提交
+# 变更（实测发生过）。HANDOFF.md 是项目交接文档，**有意保留入库**，
+# 故此处只忽略 memory/，而不是整个 .workbuddy/。
+.workbuddy/memory/
+
 # ---- IDE ----
 .idea/
 .vscode/
