@@ -81,6 +81,8 @@ markers = [
     # 用途见 tests/contract/test_task_coverage.py —— TASKS.md 里被勾成 ✅ 的任务，
     # 必须至少有一个带该标记的测试。没有它，「任务已完成」就只是文档里的一句话。
     "task: 该测试覆盖 docs/TASKS.md 中某个具体任务的验收标准",
+    # 纯组件单测（tests/core/）：不依赖数据库；依赖 Redis 的用例在不可达时自动 skip
+    "unit: 共享层组件单元测试（tests/core/，CI 的 invariants job 一并执行）",
 ]
 
 # ---------------------------------------------------------------------

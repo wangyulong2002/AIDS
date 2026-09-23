@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from aids_ai.api import api_router
 from app.core.config import is_production
 from app.core.handlers import register_exception_handlers
+from app.core.trace import TraceIdMiddleware
 
 SERVICE_NAME = "aids-ai"
 API_TITLE = "AIDS AI 智能客服服务"
@@ -39,5 +40,7 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if docs_enabled else None,
     )
     register_exception_handlers(app)
+    # SSE 流式响应要求中间件不缓冲响应体 —— TraceIdMiddleware 是纯 ASGI 实现（BE-05）
+    app.add_middleware(TraceIdMiddleware)
     app.include_router(api_router)
     return app

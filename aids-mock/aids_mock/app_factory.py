@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from aids_mock.api import api_router
 from app.core.config import is_production
 from app.core.handlers import register_exception_handlers
+from app.core.trace import TraceIdMiddleware
 
 SERVICE_NAME = "aids-mock"
 API_TITLE = "AIDS Mock 渠道服务"
@@ -36,5 +37,6 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if docs_enabled else None,
     )
     register_exception_handlers(app)
+    app.add_middleware(TraceIdMiddleware)  # traceId 全链路（BE-05），与主业务同款
     app.include_router(api_router)
     return app

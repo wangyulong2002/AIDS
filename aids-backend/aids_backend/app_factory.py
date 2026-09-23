@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from aids_backend.api import api_router
 from aids_backend.handlers import register_exception_handlers
 from app.core.config import is_production
+from app.core.trace import TraceIdMiddleware
 
 SERVICE_NAME = "aids-backend"
 API_TITLE = "AIDS 主业务服务"
@@ -37,5 +38,8 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if docs_enabled else None,
     )
     register_exception_handlers(app)
+    # traceId 全链路（BE-05）：接收/生成 X-Trace-Id → ContextVar → 回传响应头。
+    # 纯 ASGI 实现，不包装响应体 —— 本中间件同时装在 AI 服务（SSE 流式）上。
+    app.add_middleware(TraceIdMiddleware)
     app.include_router(api_router)
     return app

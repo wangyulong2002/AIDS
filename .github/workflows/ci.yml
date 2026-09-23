@@ -214,6 +214,9 @@ jobs:
       - name: 库存/幂等/退款/优惠券不变量
         run: pytest tests/invariants -q -m invariant
 
+      - name: 共享层组件单测（Redis 不可达的用例自动 skip）
+        run: pytest tests/core -q -m unit
+
       - name: 启动断言（S1 结构性防御）
         run: pytest tests/invariants/test_startup_assertions.py -q
 

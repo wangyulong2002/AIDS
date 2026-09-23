@@ -12,9 +12,9 @@
 | 项 | 值 |
 |---|---|
 | 阶段 | **T0 完成 → T1 进行中** |
-| 已勾选任务 | DOC-01~03、DEP-01~04、BE-00~**BE-04** |
-| **下一个任务** | **BE-05 通用组件**（Redis 封装 / Kafka 生产者 / 本地消息表 / traceId / sys_config 热更新） |
-| 测试基线 | 无 DB：`647 passed / 5 skipped`；有 DB：**`652 passed / 0 skipped`**（IDOR 端到端已启用） |
+| 已勾选任务 | DOC-01~03、DEP-01~04、BE-00~**BE-05** |
+| **下一个任务** | **BE-06 内部服务接口**（T1 最后一项；完成后 T1 出口对账） |
+| 测试基线 | 无 DB：`705 passed / 5 skipped`；有 DB：**`710 passed / 0 skipped`** |
 | 门禁 | 文档一致性 35 项 PASS；`ruff`（含 `scripts/`）+ `pyright` 0 errors；3 个生成器 `--check` 全绿 |
 | 镜像 | **三个服务镜像已端到端验证**：build 成功 + 容器起得来 + `/health` 返回 `code=0`（见 §4.1） |
 | 仓库规模 | ≈110 个受跟踪文件（含本次新增）；服务包 3 个（backend / ai / mock 骨架齐备） |
@@ -269,25 +269,50 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 
 ---
 
-## 5. 下一步：BE-05 通用组件
+## 4.4 本轮（2026-09-23 第五轮）：BE-05 通用组件
+
+六个子组件全部落在共享层 `app/core/`，**无新表**（`sys_local_message` / `sys_dead_letter` / `sys_config` 均已在 DDL）：
+
+| 模块 | 职责与关键决定 |
+|---|---|
+| `app/core/redis.py` | 客户端单例 + `RedisLock`：`SET NX PX` 加锁带随机 token，释放/续期用 **Lua 做原子校验**（防"锁过期换主后误删他人锁"）；无 TTL 参数直接拒绝（Redis 锁靠过期兜底） |
+| `app/core/trace.py` | traceId 全链路：**纯 ASGI 中间件**（不包装响应体——AI 服务的 SSE 依赖此点）+ `ContextVar`（投递循环等无 request 上下文处可取）；外部 traceId 只接受 8~64 位十六进制/连字符，不合规格重新生成（注入面） |
+| `app/core/sms.py` | `SmsSender` Protocol + `LoggingSmsSender`（日志**脱敏** `138****8000`）；场景白名单外的调用直接拒；Mock 通道是 MOCK-02 的接入点，BE-07 调用方零改动 |
+| `app/core/kafka_producer.py` | `acks="all"` + `enable_idempotence`（生产端幂等，消费端幂等另算）；**key = 业务单号**（同单同分区保序）；headers 自动带 traceId；未配置 `KAFKA_BOOTSTRAP_SERVERS` → 抛错，由 outbox 捕获转为"保持待投递" |
+| `app/core/outbox.py` | **事务性发件箱**：`enqueue()` 与业务行同事务登记（uk 三键幂等，先查后插避免污染业务事务）；`dispatch_once()` 状态机——成功置 1 / 失败指数退避（10,20,40…封顶 600s）/ 超 8 次转 `sys_dead_letter`（可人工重放，不是丢弃）；`OutboxRelay` 循环可测试驱动 |
+| `app/core/sys_config.py` | `sys_config` 读取：`value_type` 解析（失败**响**不串型）、单条损坏跳过整缓存不倒、未加载返回 default 并告警（宁可保守不阻塞请求）；Redis pub/sub 失效广播 → **全量重载**（配置行少，避免半新半旧） |
+
+**测试**：新增 `tests/core/` 目录 + `unit` 标记（CI 的 invariants job 增加一步执行）；Redis 依赖用例在本机真实 Redis 上验证、不可达自动 skip；共 **58 条**新测试。
+
+**两个边界（刻意留白，不是遗漏）**：
+1. 投递循环与配置失效订阅的 **lifespan 接线**留到 T3 —— 交易链路起才有消息可投；
+2. `app/core/refresh_store.py`（BE-03）暂保留自持客户端，并入通用单例列为小任务。
+
+**验证**：`task_runner verify` 8/8 PASS；pytest `705/5`（无 DB）、`710/0`（带库）；pyright 0 errors。
+
+---
+
+## 5. 下一步：BE-06 内部服务接口
 
 **验收原文**（`docs/TASKS.md`）：
 
-> Redis 封装（分布式锁/Lua 脚本）、Kafka 生产者封装（acks=all + 幂等）、
-> 本地消息表投递与重试任务、短信服务抽象接口、traceId 全链路注入
-> （Nginx→主业务→AI/Mock）、sys_config 动态配置读取 + Redis 发布订阅热更新
+> 供 AI 服务调用的订单/商品/用户查询接口；服务间静态 Token + 请求签名
+> （timestamp+nonce 防重放）+ 内网网段限制；**返回数据须脱敏**（手机号、详细地址）。
+> 依赖 BE-03, BE-04
 
-开工前建议先读（只读侦察确认过的事实，省一次翻查）：
+开工前建议先读：
 
 | 事实 | 说明 |
 |---|---|
-| `app/core/refresh_store.py` | 本仓**第一份** Redis 客户端代码（redis 8.1，`decode_responses=True`，进程级单例）——BE-05 的通用封装应**吸收**它而不是另起一套 |
-| compose 的 redis | `redis:7.4-alpine` + 密码 + AOF + `noeviction`（预扣库存 key 不能被淘汰）；连接串见根 `.env.example` 的 `REDIS_URL` |
-| `docs/PRD.md` §5.3/§5.5 | Kafka topic 清单与消息体已定稿（`order.created` 等）；`product.changed` 已撤销（搜索走同库全文索引） |
-| `deploy/nginx/conf.d/default.conf` | `X-Trace-Id` 透传已在 Nginx 侧，后端要接住生成/回传（traceId 全链路的后半段） |
-| `app/core/config.py` | 动态配置的骨架是环境变量；`sys_config` 热更新接在它旁边，不要推翻现有读取方式 |
+| `docs/API.md` §四 | 内部服务接口的路径、鉴权与脱敏要求**已定稿**（主业务 ↔ AI 服务） |
+| `docs/PRD.md` §5.3 | 服务间通信约定：静态 Token + 签名算法（timestamp+nonce 防重放）+ 内网网段限制 |
+| `app/core/security.py` | 那是**用户 JWT** 的依赖注入；内部接口是另一套（服务间静态 Token + 签名），**不要混用** |
+| `app/core/jwt.py` / JWKS | AI 服务验用户 JWT 走 JWKS 端点，与服务间鉴权正交 |
+| `app/core/trace.py` | 内部调用的消息头同样要透传 traceId |
+| `.env.example` | 已有 `INTERNAL_SERVICE_TOKEN` / `INTERNAL_SIGN_SECRET` —— 配置名有权威来源，直接复用 |
 
-**BE-03/BE-04 带来的解锁**：`FE-02`（axios 无感刷新）、`BE-30`（RBAC）依赖 BE-03 ✔；`BE-07` 起的自有资源接口依赖 BE-04 的 `OwnedRepository` ✔。BE-05 完成后 T1 只剩 BE-06。
+**T1 出口对账**：BE-06 完成 = T1 收官。按 `TASKS.md §工作量对账「决策记录」` 回来对一次账
+（T1 实测人天 vs 估算 21.5 人天），裁决是否触发分级裁剪。
 
 **收尾动作（每个任务都一样，C10 门禁会拦）**：把 `TASKS.md` 里该任务勾成 ✅ 之前，
 先给覆盖其验收标准的测试加 `pytestmark = [..., pytest.mark.task("<任务号>")]`。
