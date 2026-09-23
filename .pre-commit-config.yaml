@@ -105,3 +105,13 @@ repos:
         language: system
         pass_filenames: false
         files: ^(pyproject\.toml|constraints\.txt|scripts/gen_constraints\.py)$
+
+      - id: orm-model-sync
+        name: "ORM 模型一致性（app/models 必须由 schema.sql 生成）"
+        # 模型是生成物：DDL 改了却忘了重跑生成器，症状是运行期 Unknown column。
+        # 注意本钩子只保证"文件 == 生成器输出"；"生成器解析对不对"由
+        # tests/contract/test_orm_matches_schema.py 用独立解析器把关（两层缺一不可）。
+        entry: python3 scripts/gen_orm_models.py --check
+        language: system
+        pass_filenames: false
+        files: ^(docs/sql/schema\.sql|app/models/.*|scripts/gen_orm_models\.py)$

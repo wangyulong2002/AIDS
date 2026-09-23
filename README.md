@@ -49,13 +49,22 @@ cd deploy && docker compose --profile minimal up -d
 
 ```
 AIDS/
-├── app/                        # 主业务服务（FastAPI）
+├── app/                        # ★ 跨服务共享层（SSOT，三个服务都依赖同一份）
 │   ├── core/
 │   │   ├── errors.py           # ★ SSOT：错误码（对齐 API.md §1.2/§1.3）
 │   │   ├── response.py         # ★ SSOT：统一响应体（对齐 API.md §1.1）
 │   │   └── config.py           # ★ 结构性防御 S1：启动断言
-│   └── domain/
-│       └── enums.py            # ★ SSOT：状态枚举（对齐 DATA-DICTIONARY §一）
+│   ├── domain/
+│   │   └── enums.py            # ★ SSOT：状态枚举（对齐 DATA-DICTIONARY §一）
+│   ├── orm/                    # ★ BE-02 ORM 基建
+│   │   ├── snowflake.py        #   雪花 ID（主键由应用层生成，schema.sql 约定 2）
+│   │   ├── base.py             #   DeclarativeBase + 约束命名约定（Alembic 依赖）
+│   │   ├── mixins.py           #   按需组合的列组：PK / 时间戳 / 软删除 / 乐观锁
+│   │   ├── session.py          #   async engine + sessionmaker（全进程唯一入口）
+│   │   ├── soft_delete.py      #   逻辑删除（显式过滤器，刻意不做全局隐式）
+│   │   ├── pagination.py       #   分页（对齐 API.md §1.1 的 pageNum/pageSize）
+│   │   └── optimistic.py       #   乐观锁条件更新（version 条件 + 自增）
+│   └── models/                 # ★ 生成物：38 表 ORM 模型（源 = docs/sql/schema.sql）
 ├── tests/
 │   ├── contract/               # ★ 契约测试：文档 ↔ 代码 一致性（CI 门禁核心）
 │   │   ├── _doc_parser.py      #   直接解析 docs/*.md，不抄文档内容
@@ -77,14 +86,15 @@ AIDS/
 │   ├── API.md                  # 接口契约 + 错误码分段
 │   ├── 工程化门禁方案.md        # ★ 本门禁体系的设计说明
 │   └── sql/                    # schema.sql / mock_schema.sql / seed.sql
-├── aids-backend/               # 三服务镜像的依赖清单（由 pyproject.toml 生成）
-├── aids-ai/                    #   └ 对应 deploy/app/{backend,ai,mock}.Dockerfile
-├── aids-mock/                  #      的构建上下文
+├── aids-backend/               # ★ 主业务服务：aids_backend/（代码）+ alembic/（迁移）+ requirements.txt
+├── aids-ai/                    #   另两个服务目前只有依赖清单（未开工）
+├── aids-mock/                  #   └ 三份 requirements.txt 均由 pyproject.toml 生成
 ├── constraints.txt             # 依赖版本快照（已验证的精确组合；CI/Docker 用 -c 引用）
 ├── deploy/                     # Docker Compose（9 服务分档）
 ├── scripts/hooks/              # pre-commit hook 脚本
 ├── scripts/gen_requirements.py # 依赖清单生成器 + 一致性门禁
 ├── scripts/gen_constraints.py  # 依赖快照生成器 + 一致性门禁
+├── scripts/gen_orm_models.py   # ORM 模型生成器 + 一致性门禁（源 = docs/sql/schema.sql）
 ├── .pre-commit-config.yaml     # 门禁 L1
 └── .github/workflows/ci.yml    # 门禁 L2/L3
 ```
@@ -161,6 +171,14 @@ python3 scripts/gen_requirements.py --write     # 改完 pyproject.toml 后重�
 python3 scripts/gen_requirements.py --check     # 校验（pre-commit 与 CI 跑的就是这条）
 python3 scripts/gen_constraints.py --write      # 依赖升级后重刷版本快照（在跑通 pytest 的环境里）
 python3 scripts/gen_constraints.py --check      # 校验快照覆盖 pyproject 全部直接依赖
+
+# ORM 模型（源是 docs/sql/schema.sql；app/models/ 是生成物，不手改）
+python3 scripts/gen_orm_models.py --write       # DDL 变更后重新生成模型
+python3 scripts/gen_orm_models.py --check       # 校验模型与 DDL 一致（CI / pre-commit 跑的就是这条）
+
+# Alembic 迁移（基建已就位；纳管既有 DDL 见 docs/TASKS.md DEP-04，留待 T1）
+alembic -c aids-backend/alembic.ini heads                    # 校验配置可加载（不需要 DB）
+alembic -c aids-backend/alembic.ini upgrade head --sql       # 只打印 SQL（不需要 DB）
 ```
 
 ---
@@ -178,6 +196,7 @@ python3 scripts/gen_constraints.py --check      # 校验快照覆盖 pyproject �
 | 改统一响应结构 | `API.md` §1.1 | C7 |
 | 改不变量规则 | `DATA-DICTIONARY.md` §四 | C3/C5/C6 |
 | 依赖增删/升级 | 只改 `pyproject.toml`，再跑 `scripts/gen_requirements.py --write` 与 `scripts/gen_constraints.py --write` | pre-commit `requirements-sync` / `constraints-check` + CI consistency |
+| 改表结构（加列/加表） | 改 `docs/sql/schema.sql`（+`DATA-DICTIONARY.md` §二/§三），再跑 `scripts/gen_orm_models.py --write` | C1 + `test_orm_matches_schema.py`（C9）+ pre-commit `orm-model-sync` |
 
 > **依赖只有一处声明来源**：`pyproject.toml`。`aids-backend/`、`aids-ai/`、`aids-mock/`
 > 三个目录里的 `requirements.txt` 是**生成物**（Dockerfile 构建时要拷的文件），

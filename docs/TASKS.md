@@ -79,7 +79,7 @@
 |------|------|------|------|----------------|------|
 | BE-00 | 工程 | ✅ | **门禁与契约测试基线** | pre-commit（L1）+ GitHub Actions CI（L2/L3）+ `tests/contract/` 五类一致性测试（C2 枚举映射 / C4 错误码 / C1 表结构 / C7 统一响应 / C8 UNIQUE 索引）+ `tests/invariants/`（C3/C5/C6 库存恒等式·幂等键·退款边界、S1 启动断言、S4 IDOR 守卫）+ `app/domain/enums.py`、`app/core/errors.py`、`app/core/response.py`、`app/core/config.py` 四份 SSOT。详见 `docs/工程化门禁方案.md`。**验收：`pytest tests/contract` 全绿；故意写一处硬编码错误码能被 pre-commit 拦截** | — |
 | BE-01 | 后端 | ☐ | 项目脚手架 | FastAPI (Python 3.11) + Pydantic v2 + SQLAlchemy 2.0 (async)；统一响应 `{code,message,data}`、全局异常处理、1xxxx-9xxxx 错误码分段；APIRouter 模块化分包（user/product/order/pay/marketing/admin）。**注：统一响应/错误码/枚举已由 BE-00 提供，本任务直接复用，禁止另起一套** | BE-00 |
-| BE-02 | 后端 | ☐ | ORM 基建 | SQLAlchemy 2.0 async 基建：雪花 ID 生成器、create_time/update_time 自动填充（Mapper 事件）、逻辑删除（查询过滤器）、分页、乐观锁（version 条件更新）；**Alembic 迁移基建**；验收：DDL 全表可生成基础 CRUD | BE-01 |
+| BE-02 | 后端 | ✅ | ORM 基建 | SQLAlchemy 2.0 async 基建：雪花 ID 生成器、create_time/update_time 自动填充（Mapper 事件）、逻辑删除（查询过滤器）、分页、乐观锁（version 条件更新）；**Alembic 迁移基建**；验收：DDL 全表可生成基础 CRUD | BE-01 |
 | BE-03 | 后端 | ☐ | 鉴权模块 | JWT 双 Token（Access 2h/Refresh 7d）、**RS256 签发 + JWKS 公钥端点**（PyJWT + cryptography，供 AI 服务验签）、Refresh 存 Redis 支持吊销、依赖注入式鉴权拦截；验收：过期/伪造/刷新用例全部通过单测 | BE-01 |
 | BE-04 | 后端 | ☐ | **数据权限（IDOR 防护）** | 按 PRD §2.2：SQLAlchemy 统一查询过滤器（Repository 基类）统一注入行级条件，业务代码禁止从请求参数读 userId 做权限判断；资源访问一律 `WHERE id=? AND user_id=?`，查不到返回 403；**验收：用 A 的 Token 访问 B 的订单/地址/优惠券/会话全部 403，批量递增 ID 扫描无一条越权数据泄露** | BE-03 |
 | BE-05 | 后端 | ☐ | 通用组件 | Redis 封装（分布式锁/Lua 脚本）、Kafka 生产者封装（acks=all + 幂等）、**本地消息表投递与重试任务**、短信服务抽象接口、traceId 全链路注入（Nginx→主业务→AI/Mock）、**sys_config 动态配置读取 + Redis 发布订阅热更新** | BE-01 |

@@ -55,6 +55,11 @@ jobs:
       - name: 依赖快照一致性（constraints.txt 覆盖 pyproject 全部直接依赖）
         run: python3 scripts/gen_constraints.py --check
 
+      - name: ORM 模型一致性（app/models ← docs/sql/schema.sql）
+        # 纯标准库，与上面两条同属"单一来源 + 派生"的一致性门禁：
+        # 模型是生成物，DDL 改了却忘了重跑生成器，症状是运行期 Unknown column。
+        run: python3 scripts/gen_orm_models.py --check
+
   # ---------------------------------------------------------------
   # L2-a 代码风格与静态检查
   # ---------------------------------------------------------------
@@ -171,6 +176,11 @@ jobs:
             exit 1
           fi
         continue-on-error: false
+
+      - name: Alembic 迁移基建可加载（不需要 DB）
+        # 验证 alembic.ini / env.py / 模型导入链是通的 —— 这类问题只在
+        # 真正跑迁移时才暴露，而那时通常已经在部署窗口里了。
+        run: alembic -c aids-backend/alembic.ini heads
 
       - name: C1/C2/C4/C7/C8 契约测试（静态层）
         # 用 `tests` 而非 `tests/contract`：BE-01 起的接口层契约测试在

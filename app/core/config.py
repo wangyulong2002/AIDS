@@ -76,7 +76,12 @@ def assert_db_not_test_env_in_prod(
     生产环境不得连测试库，测试环境不得连生产库（见 assert_db_is_isolated）。
     """
     env = env or get_env()
-    db_url = db_url or os.getenv("DATABASE_URL", "")
+    # ★ 用 `is not None` 而不是 `or`：显式传空串的语义是"我知道它是空的"，
+    #   与"根本没传、应去读环境变量"是两种不同意图。
+    #   用 `or` 会让显式空串**静默回退到环境变量** —— 于是"生产环境没配
+    #   DATABASE_URL"这条断言在被测环境恰好设了 DATABASE_URL 时就失效了
+    #   （tests/invariants/test_startup_assertions.py 正是靠传 "" 模拟该场景）。
+    db_url = db_url if db_url is not None else os.getenv("DATABASE_URL", "")
 
     if env != PRODUCTION:
         return
@@ -143,7 +148,8 @@ def assert_db_is_isolated(db_url: str | None = None, env: str | None = None) -> 
     现在写进启动路径，跑测试时自动生效。
     """
     env = env or get_env()
-    db_url = db_url or os.getenv("DATABASE_URL", "")
+    # 同 assert_db_not_test_env_in_prod：显式空串不得回退到环境变量
+    db_url = db_url if db_url is not None else os.getenv("DATABASE_URL", "")
 
     if env not in (TEST, DEVELOPMENT):
         return
