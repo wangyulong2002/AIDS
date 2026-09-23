@@ -24,6 +24,13 @@
 - `code = 0` 表示成功，非 0 为错误码
 - HTTP 状态码语义：`200` 业务成功/业务失败（**业务失败也返回 200，用 code 区分**）、`401` 未认证、`403` 无权限、`429` 限流、`500` 系统异常
 
+> **唯一例外**：`GET /.well-known/jwks.json`（JWT 公钥集，TASKS BE-03）返回 RFC 7517 的**原始文档**
+> （`{"keys":[...]}`），**不套统一响应体**。它是被 `PyJWKClient` 这类标准客户端直接消费的发现文档，
+> 套壳会让所有现成 JWT 库解析失败——为了"结构统一"去改写标准文档，收益为负。
+> 该端点不在 `/api/**` 下，服务间调用走内网直连（不经 Nginx 反代）。
+> **路径与分发方式由 PRD §5.3 约定**（主业务暴露、AI 服务启动时拉取并缓存），本文件只登记它在
+> §1.1 统一响应体上的例外，不另立规则。
+
 **统一分页**：
 
 ```
@@ -101,6 +108,12 @@
 | PUT | `/user/address/{id}` | 修改地址 | 登录 |
 | DELETE | `/user/address/{id}` | 删除地址 | 登录 |
 | PUT | `/user/address/{id}/default` | 设为默认地址 | 登录 |
+
+> **Token 生命周期（BE-03）**：`/auth/refresh` 用 Refresh 换新的一对 Token，且**旧 Refresh 立即作废**
+> （轮换而非续期——被盗凭证只剩一次使用机会，用户侧下次刷新失败即暴露异常）；
+> `/auth/logout` 只需 Access Token：Access 与 Refresh 共享会话标识 `sid`，凭 Access 即可吊销整个会话，
+> 前端无需回传 Refresh（"前端忘传"会让退出登录静默失效）。
+> 刷新响应体与登录响应**同构**：`accessToken` / `expiresIn` / `refreshToken` / `refreshExpiresIn`。
 
 **`POST /auth/sms/send`**
 

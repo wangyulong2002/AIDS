@@ -31,6 +31,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from console_compat import tolerate_console_encoding  # noqa: E402
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VENV = PROJECT_ROOT / ".venv"
 
@@ -206,21 +210,8 @@ def check_containers(r: Report) -> None:
         r.ok(f"中间件容器 healthy（{len(EXPECTED_CONTAINERS)} 项抽查）")
 
 
-def _tolerate_console_encoding() -> None:
-    """把控制台编码错误降级为替换符，而不是让自检崩在 print 上。
-
-    Windows 中文控制台默认 GBK(cp936)，并非所有符号都能编码。
-    这里保留原编码（不乱码），只把编不出的字符退化成 `?`——
-    「自检脚本自己崩掉」比「输出里有个问号」糟糕得多。
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(errors="replace")
-
-
 def main() -> int:
-    _tolerate_console_encoding()
+    tolerate_console_encoding()
     print("=" * 62)
     print("AIDS 开发环境自检")
     print(f"仓库：{PROJECT_ROOT}")

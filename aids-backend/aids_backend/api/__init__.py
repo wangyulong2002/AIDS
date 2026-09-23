@@ -5,6 +5,8 @@
     | 模块      | prefix     | 文档位置        |
     |-----------|------------|-----------------|
     | health    | （无）     | 部署探针        |
+    | jwks      | （无）     | `/.well-known/jwks.json`（BE-03，跨服务验签） |
+    | auth      | /auth      | API.md §2.1     |
     | user      | /user      | API.md §2.1     |
     | product   | /product   | API.md §2.2     |
     | order     | /order     | API.md §2.4     |
@@ -17,7 +19,7 @@
 才发现（bysj 的典型故障）。
 
 尚未建立分组的路径（按 TASKS 由后续任务补齐，勿在此臆造）：
-    /auth（BE-03 鉴权）、/cart、/refund、/review、/category、/home、/message、
+    /cart、/refund、/review、/category、/home、/message、
     /internal（BE-06 内部服务接口）、/api/ai（AI 服务）
 """
 
@@ -25,11 +27,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from aids_backend.api import admin, health, marketing, order, pay, product, user
+from aids_backend.api import admin, auth, health, jwks, marketing, order, pay, product, user
 
 api_router = APIRouter()
 
 api_router.include_router(health.router)
+api_router.include_router(jwks.router)
+api_router.include_router(auth.router)
 api_router.include_router(user.router)
 api_router.include_router(product.router)
 api_router.include_router(order.router)
@@ -37,10 +41,11 @@ api_router.include_router(pay.router)
 api_router.include_router(marketing.router)
 api_router.include_router(admin.router)
 
-# 业务模块路由（不含 health）。
+# 业务模块路由（不含 health / jwks：前者是探针，后者是标准发现文档）。
 # 单独登记成注册表，供契约测试断言「模块 ↔ 前缀」不被静默改动——
 # 直接从 app.routes 反推是做不到的：空 router 在 include 后不产生 Route。
 MODULE_ROUTERS: dict[str, APIRouter] = {
+    "auth": auth.router,
     "user": user.router,
     "product": product.router,
     "order": order.router,

@@ -3,7 +3,7 @@
 > **这份文档与工具无关。** 面向任何接手本仓库的开发者或 AI 会话。
 > 上一个会话用的是 WorkBuddy，其工作日志留在 `.workbuddy/memory/`（内容已提炼到本文件，可仅作参考）。
 >
-> 最后更新：2026-09-23 · 对应提交 `df60f82`
+> 最后更新：2026-09-23（第三轮：B5 裁决落纸 + 协作治具 + BE-03 鉴权模块）· 各轮提交见 `git log`，现状只看 §0
 
 ---
 
@@ -12,16 +12,17 @@
 | 项 | 值 |
 |---|---|
 | 阶段 | **T0 完成 → T1 进行中** |
-| 已勾选任务 | DOC-01~03、DEP-01~04、BE-00、**BE-01**、**BE-02** |
-| **下一个任务** | **BE-03 鉴权模块**（前置 BE-01 已齐） |
-| 测试基线 | 无 DB：`603 passed / 6 skipped`；有 DB：**`608 passed / 1 skipped`** |
+| 已勾选任务 | DOC-01~03、DEP-01~04、BE-00、BE-01、BE-02、**BE-03** |
+| **下一个任务** | **BE-04 数据权限（IDOR 防护）**（前置 BE-03 已齐，`CurrentUser.user_id` 是它的唯一用户来源） |
+| 测试基线 | 无 DB：`630 passed / 6 skipped`；有 DB：**`640 passed / 1 skipped`** |
 | 门禁 | 文档一致性 35 项 PASS；`ruff`（含 `scripts/`）+ `pyright` 0 errors；3 个生成器 `--check` 全绿 |
 | 镜像 | **三个服务镜像已端到端验证**：build 成功 + 容器起得来 + `/health` 返回 `code=0`（见 §4.1） |
 | 仓库规模 | ≈110 个受跟踪文件（含本次新增）；服务包 3 个（backend / ai / mock 骨架齐备） |
 | 远端 | `main` 与 `origin/main` 一致（`df60f82`），无未推送 |
 
-**业务代码量：0 行。** 目前全部是地基（门禁 + 契约测试 + ORM 基建 + 38 表模型 + 三服务骨架）。
-T1 才开始写业务，BE-03 是第一块。
+**业务代码量：T1 首块已落地。** 地基（门禁 + 契约测试 + ORM 基建 + 38 表模型 + 三服务骨架）之外，
+已有 BE-03 鉴权内核（JWT 双 Token / RS256 / JWKS / Refresh 轮换与吊销 / 依赖注入拦截）。
+其余仍是分组占位，BE-04 是下一块。
 
 ### 0.1 上一轮修复的三个前置条件（B1/B2/B3）
 
@@ -220,28 +221,60 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 
 ---
 
-## 5. 下一步：BE-03 鉴权模块
+## 4.2 本轮（2026-09-23 第三轮）：BE-03 鉴权模块
+
+**交付**（严格按 `TASKS.md` 验收原文：「过期/伪造/刷新用例全部通过单测」）：
+
+| 文件 | 职责 |
+|---|---|
+| `app/core/jwt.py` | Token 内核：RS256 签发/验签、双 Token 带 `typ`、`sid` 会话标识、RFC 7638 kid、JWKS 文档 |
+| `app/core/refresh_store.py` | Refresh 一次性存储：`Protocol` + Redis（`GETDEL` 原子） + 进程内实现（测试/无 Redis 显式降级） |
+| `app/core/config.py` | 新增 JWT/Redis 配置读取 + **S1-e 启动断言**（生产缺密钥文件直接拒绝启动） |
+| `aids-backend/aids_backend/deps.py` | 依赖注入：`CurrentUser` / `get_current_user` / `require_roles`（越权防线唯一入口，BE-04 依赖它） |
+| `aids-backend/aids_backend/api/auth.py` | `POST /auth/refresh`（轮换）、`POST /auth/logout`（吊销会话） |
+| `aids-backend/aids_backend/api/jwks.py` | `GET /.well-known/jwks.json`（供 AI/Mock 服务验签） |
+| `tests/api/test_auth_tokens.py` | **27 条验收用例**（标记 `task("BE-03")`）：过期 / 伪造 / `alg=none` / 篡改 / 跨类型 / 重放 / 吊销 / JWKS 只含公钥 / AI 服务独立验签 |
+| `tests/invariants/test_startup_assertions.py` | 新增 S1-e 的 5 条用例 |
+
+**几个刻意的设计取舍**（都写进了代码注释）：
+
+1. **Access 与 Refresh 共享 `sid`**：`/auth/logout` 因此只需 Access Token。
+   若要求回传 Refresh，「前端忘传」会让退出登录静默变成没退出。
+2. **刷新即轮换**（旧 Refresh 立刻作废）：被盗凭证只剩一次机会，用户侧下次刷新失败即暴露异常。
+3. **JWKS 不套统一响应体**（API.md §1.1 的唯一例外，已注明）：它是被 `PyJWKClient` 消费的标准发现文档。
+4. **BE-03 不碰数据库**：鉴权内核必须能在没有 DB 的情况下被完整测试，读用户表属 BE-07。
+
+**验证**：`scripts/task_runner.py verify` 8 项全绿（含 630/640 测试、pyright 0 error）。
+
+---
+
+## 5. 下一步：BE-04 数据权限（IDOR 防护）
 
 **验收原文**（`docs/TASKS.md`）：
 
-> JWT 双 Token（Access 2h / Refresh 7d）、**RS256 签发 + JWKS 公钥端点**
-> （PyJWT + cryptography，供 AI 服务验签）、Refresh 存 Redis 支持吊销、
-> 依赖注入式鉴权拦截；**验收：过期/伪造/刷新用例全部通过单测**
+> 按 PRD §2.2：SQLAlchemy 统一查询过滤器（Repository 基类）统一注入行级条件，
+> 业务代码禁止从请求参数读 userId 做权限判断；资源访问一律 `WHERE id=? AND user_id=?`，
+> 查不到返回 403；**验收：用 A 的 Token 访问 B 的订单/地址/优惠券/会话全部 403，
+> 批量递增 ID 扫描无一条越权数据泄漏**
 
-开工前建议先读：
+开工前建议先读（下表是只读侦察的确认结果，省你一次翻查）：
 
-- `docs/API.md` §1.2/§1.3（鉴权相关的响应与错误码：`10002`/`10003`）
-- `docs/PRD.md` §10（安全基线）
-- `docs/sql/schema.sql` 的 `biz_user` 与 `sys_user`（`password` / `status` / `deleted`）
-- `app/core/config.py`（`SECRET_KEY` / `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` 已在 S1 断言里）
-- `app/orm/session.py`（会话怎么拿）
+| 事实 | 说明 |
+|---|---|
+| `aids-backend/aids_backend/deps.py` | `CurrentUser.user_id` 是**唯一**允许的用户来源；BE-04 的 Repository 过滤器只从这里取 |
+| `app/orm/session.py` | 会话 DI 函数名是 **`get_db`**（不是 `get_session`）；另有 `session_scope()`（自动 commit/rollback）、`get_engine()`、`dispose_engine()` |
+| `app/orm/soft_delete.py` | 过滤器函数是 **`alive(stmt, model)`**；**刻意没有全局隐式过滤**（默认不过滤）；对无 `deleted` 列的表抛 `TypeError` |
+| `app/core/exceptions.py` | 越权用 `BusinessError.data_forbidden()`（10005）：措辞刻意不暴露资源是否存在 |
+| 权限模型是**两层** | C 端 `BizUser` **无 role 列**；B 端角色经 `SysUserRole` 关联，`data_scope` 在 `SysRole.data_scope`。BE-04 的 `WHERE user_id=?` 针对 C 端自有资源，B 端 `data_scope` 是另一套，**不要混谈** |
+| `tests/invariants/test_idor_guard.py` | ① `class TestIdorEndToEnd` 有 `pytest.mark.skip(…待 T1 BE-04…)` 占位，`test_batch_ascending_id_scan_no_leak` 目前 `raise NotImplementedError` → BE-04 做完去掉 skip；② 该文件的**豁免路径写的是 `app/core/security.py`，而该文件不存在**（悬空豁免）——BE-04 顺带修正（悬空豁免会让扫描器看起来"留了口子"） |
+| 参考文档 | `docs/PRD.md` §2.2 与 §12.4、`docs/API.md` §1.3 的 `10005` |
 
-**注意**：`SECRET_KEY` 与 JWT 私钥路径的 S1 断言已存在，鉴权模块应复用而非另起一套。
+**BE-03 带来的解锁**：`FE-02`（axios 无感刷新）与 `BE-30`（RBAC）都依赖 BE-03，现已就绪。
 
-**收尾动作（C10 门禁会拦）**：把 `TASKS.md` 的 BE-03 勾成 ✅ 之前，先给覆盖其验收标准的测试文件加
-`pytestmark = [pytest.mark.contract, pytest.mark.task("BE-03")]`（或 `pytest.mark.invariant`）。
-没有 `task` 标记时，`tests/contract/test_task_coverage.py` 会红——这条门禁的存在就是为了让
-「任务已完成」必须对应一个真实存在的测试。推荐顺序：**先写测试并打标记，再勾选任务**。
+**收尾动作（每个任务都一样，C10 门禁会拦）**：把 `TASKS.md` 里该任务勾成 ✅ 之前，
+先给覆盖其验收标准的测试加 `pytestmark = [..., pytest.mark.task("<任务号>")]`。
+没有 `task` 标记时 `tests/contract/test_task_coverage.py` 会红——这条门禁存在的意义
+就是让「任务已完成」必须对应一个真实存在的测试。推荐顺序：**先写测试并打标记，再勾选任务**。
 
 ---
 
@@ -250,7 +283,8 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 | 项 | 状态 |
 |---|---|
 | **B4 · Ark API Key 与真实模型调用** | 按用户决定**暂缓**（本轮不动）。影响 AI-02 起的任务：本地用桩推进实现，`AI-01` 脚手架不依赖它 |
-| **B5 · 范围与工期裁决** | **待裁决**。`TASKS.md §工作量对账` 已自认 T1~T6 估算 ≈168 人天 vs 计划容量 80 人天（2.1 倍），A/B/C 三选项需人拍板；在此之前 AI 只能按"T3/T5 不可裁"的既有约束执行 |
+| **B5 · 范围与工期裁决** | **已裁决（2026-09-23）**：采纳「1 人 + AI 作为第二执行者」，**范围暂不裁剪**，改由 T1 出口的实测压缩率触发分级裁剪。判据、裁剪顺序与硬底线见 `TASKS.md §工作量对账` 的「决策记录」。**T1 出口时要回来对一次账**（实测人天 vs 估算 21.5 人天） |
+| **S1-c 与 S1-e 的口径** | `assert_required_keys_present`（Ark/字段加密密钥）与 `assert_jwt_keys_configured`（JWT 密钥文件）分列两条断言；若后续把密钥统一收敛到 KeyProvider，应合并并同步本表 |
 | **`.env.example` 与 compose 的中间件口令护栏** | 已登记为「未落地的约束」（`项目设计报告.md §9.10`），触发条件：首次部署到可被外网访问的环境前 |
 | **Nginx TLS** | 同上（443 目前是空映射） |
 | **Alembic 纳管既有 DDL** | `DEP-04` 明确留待 T1；基建已就位，`aids-backend/alembic/versions/README.md` 写了正确的纳管步骤 |

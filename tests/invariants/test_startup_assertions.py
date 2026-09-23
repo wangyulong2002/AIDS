@@ -17,9 +17,11 @@ from app.core.config import (
     StartupAssertionError,
     assert_db_is_isolated,
     assert_db_not_test_env_in_prod,
+    assert_jwt_keys_configured,
     assert_required_keys_present,
     assert_secret_key_not_default,
     get_env,
+    get_jwt_access_ttl,
     is_production,
 )
 
@@ -118,6 +120,46 @@ class TestRequiredKeysPresent:
         for key in ("ARK_API_KEY", "FIELD_ENCRYPT_KEY", "FIELD_HMAC_KEY"):
             monkeypatch.delenv(key, raising=False)
         assert_required_keys_present(env="development")
+
+
+class TestJwtKeysConfigured:
+    """S1-e（BE-03）：生产环境必须能读到 JWT 密钥文件。
+
+    为什么值得在启动阶段拦：私钥缺失的症状**不是**"启动失败"，而是
+    "第一个用户登录时才 500"——那时服务已经在对外提供服务了。
+    公钥缺失更隐蔽：签发照常，AI 服务验签全失败，表现为"AI 客服总说未登录"。
+    """
+
+    def test_prod_missing_keys_rejected(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(tmp_path / "missing_private.pem"))
+        monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(tmp_path / "missing_public.pem"))
+        with pytest.raises(StartupAssertionError, match="JWT 密钥文件不存在"):
+            assert_jwt_keys_configured(env="production")
+
+    def test_prod_existing_keys_allowed(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        private = tmp_path / "jwt_private.pem"
+        public = tmp_path / "jwt_public.pem"
+        private.write_text("placeholder", encoding="utf-8")
+        public.write_text("placeholder", encoding="utf-8")
+        monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(private))
+        monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(public))
+        assert_jwt_keys_configured(env="production")  # 不抛异常即通过
+
+    def test_non_production_skips_check(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        """非生产用临时密钥（`JwtKeys.generate()`），不要求文件存在。"""
+        monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(tmp_path / "missing.pem"))
+        monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(tmp_path / "missing.pem"))
+        assert_jwt_keys_configured(env="development")
+
+    def test_invalid_ttl_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非法 TTL 必须报错而不是静默回退默认值——静默回退是"配置没生效却没人发现"。"""
+        monkeypatch.setenv("JWT_ACCESS_TTL", "two-hours")
+        with pytest.raises(StartupAssertionError, match="必须是整数"):
+            get_jwt_access_ttl()
+
+    def test_blank_ttl_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("JWT_ACCESS_TTL", "   ")
+        assert get_jwt_access_ttl() == 7200
 
 
 class TestEnvReading:

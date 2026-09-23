@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 # =====================================================================
 # 环境判定
@@ -167,6 +168,80 @@ def assert_db_is_isolated(db_url: str | None = None, env: str | None = None) -> 
         )
 
 
+def assert_jwt_keys_configured(env: str | None = None) -> None:
+    """S1-e：生产环境必须能读到 JWT 签名/验签密钥文件。
+
+    为什么必须在**启动**阶段拦：
+        私钥缺失的症状不是"启动失败"，而是"第一个用户登录时才 500"——
+        那时服务已经在对外提供服务了。公钥缺失更隐蔽：签发照常，
+        AI 服务验签全部失败，表现为"AI 客服总说未登录"。
+    非生产环境跳过：本地与测试用临时密钥（`JwtKeys.generate()`）。
+    """
+    env = env or get_env()
+    if env != PRODUCTION:
+        return
+
+    missing = [
+        f"{name}（{path}）"
+        for name, path in (
+            ("JWT_PRIVATE_KEY_PATH", get_jwt_private_key_path()),
+            ("JWT_PUBLIC_KEY_PATH", get_jwt_public_key_path()),
+        )
+        if not path.is_file()
+    ]
+    if missing:
+        raise StartupAssertionError(
+            "生产环境 JWT 密钥文件不存在：\n  - " + "\n  - ".join(missing) + "\n"
+            "生成：openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt_private.pem\n"
+            "      openssl rsa -in jwt_private.pem -pubout -out jwt_public.pem"
+        )
+
+
+# =====================================================================
+# JWT / Redis 配置（BE-03 鉴权模块）
+#
+# 键名以根 .env.example 为唯一权威（deploy/.env.example 必须同名，
+# 由文档门禁 check_env_hygiene 强制）。这里只做读取与默认值，不新造名字。
+# =====================================================================
+
+DEFAULT_JWT_ACCESS_TTL: int = 7200  # 2h，与 API.md §2.1 的 expiresIn 一致
+DEFAULT_JWT_REFRESH_TTL: int = 604800  # 7d
+DEFAULT_JWT_PRIVATE_KEY_PATH: str = "./secrets/jwt_private.pem"
+DEFAULT_JWT_PUBLIC_KEY_PATH: str = "./secrets/jwt_public.pem"
+
+
+def _int_env(name: str, default: int) -> int:
+    """读整数环境变量。非法值直接抛错——静默回退默认值是"配置没生效但没人发现"的经典成因。"""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError as exc:
+        raise StartupAssertionError(f"{name} 必须是整数，当前值 {raw!r}") from exc
+
+
+def get_jwt_access_ttl() -> int:
+    return _int_env("JWT_ACCESS_TTL", DEFAULT_JWT_ACCESS_TTL)
+
+
+def get_jwt_refresh_ttl() -> int:
+    return _int_env("JWT_REFRESH_TTL", DEFAULT_JWT_REFRESH_TTL)
+
+
+def get_jwt_private_key_path() -> Path:
+    return Path(os.getenv("JWT_PRIVATE_KEY_PATH") or DEFAULT_JWT_PRIVATE_KEY_PATH)
+
+
+def get_jwt_public_key_path() -> Path:
+    return Path(os.getenv("JWT_PUBLIC_KEY_PATH") or DEFAULT_JWT_PUBLIC_KEY_PATH)
+
+
+def get_redis_url() -> str:
+    """Redis 连接串。空串表示未配置（Refresh 吊销会显式降级为进程内存储）。"""
+    return os.getenv("REDIS_URL", "").strip()
+
+
 # =====================================================================
 # 统一入口
 # =====================================================================
@@ -182,6 +257,7 @@ def run_startup_assertions() -> None:
     assert_db_is_isolated(env=env)
     assert_secret_key_not_default(env=env)
     assert_required_keys_present(env=env)
+    assert_jwt_keys_configured(env=env)
     print(f"[启动断言] 通过 (APP_ENV={env})", file=sys.stderr)
 
 

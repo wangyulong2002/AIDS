@@ -31,6 +31,7 @@ BACKEND_DOCKERFILE = PROJECT_ROOT / "deploy" / "app" / "backend.Dockerfile"
 # 模块 → 前缀。必须与 aids_backend/api/__init__.py 的映射表、
 # docs/API.md 的真实路径三方一致。
 EXPECTED_PREFIXES: dict[str, str] = {
+    "auth": "/auth",  # BE-03：Token 生命周期（refresh / logout）
     "user": "/user",
     "product": "/product",
     "order": "/order",

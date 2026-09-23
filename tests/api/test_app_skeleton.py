@@ -238,9 +238,10 @@ class TestExceptionHandlers:
 
 
 class TestModuleWiring:
-    EXPECTED_MODULES = {"user", "product", "order", "pay", "marketing", "admin"}
+    # 模块清单随梯次增长：BE-03 增加 auth（Token 生命周期），其余待 BE-07 起填充
+    EXPECTED_MODULES = {"auth", "user", "product", "order", "pay", "marketing", "admin"}
 
-    def test_all_six_modules_are_registered(self) -> None:
+    def test_all_modules_are_registered(self) -> None:
         assert set(MODULE_ROUTERS) == self.EXPECTED_MODULES
 
     def test_each_module_has_its_own_router_instance(self) -> None:
