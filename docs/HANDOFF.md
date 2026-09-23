@@ -301,6 +301,7 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 | 项 | 状态 |
 |---|---|
 | **B4 · Ark API Key 与真实模型调用** | 按用户决定**暂缓**（本轮不动）。影响 AI-02 起的任务：本地用桩推进实现，`AI-01` 脚手架不依赖它 |
+| **pre-commit 的 ruff 版本与 CI 偏斜** | pre-commit 钉 `v0.8.4`，CI 经 constraints 装的是 0.16.x —— 同一份代码两边判定不同（实测 v0.8.4 报 `UP038`、0.16.x 不报；BE-04 提交时被 L1 拦下，见 `test_idor_guard.py:149` 的修改）。**处置（单独小任务，勿与功能提交混做）**：先在 `constraints.txt` 给 ruff 上锁，再把 `.pre-commit-config.yaml` 的 ruff `rev` 对齐到该版本，最后 `pre-commit run --all-files` 清一次全仓噪音 |
 | **B5 · 范围与工期裁决** | **已裁决（2026-09-23）**：采纳「1 人 + AI 作为第二执行者」，**范围暂不裁剪**，改由 T1 出口的实测压缩率触发分级裁剪。判据、裁剪顺序与硬底线见 `TASKS.md §工作量对账` 的「决策记录」。**T1 出口时要回来对一次账**（实测人天 vs 估算 21.5 人天） |
 | **Nginx `/api/` 前缀与后端路由不一致** | **已修复（2026-09-23，用户裁决取"nginx 剥离"方案）**：`location /api/` 加 `rewrite ^/api/(.*)$ /$1 break;`，后端路由保持无 `/api` 前缀；`/api/ai/**` 走更长前缀的独立 location，不受影响（AI 侧自带 `/api/ai` 前缀）。已实测：重建 `aids/nginx` 镜像并替换容器后，`GET /api/health` 经网关 → 后端日志为 `/health`（200），`/healthz` 200。教训已写进 `deploy/nginx/conf.d/default.conf` 的 location 注释；`API.md §1.1` 已注明剥离行为 |
 | **S1-c 与 S1-e 的口径** | `assert_required_keys_present`（Ark/字段加密密钥）与 `assert_jwt_keys_configured`（JWT 密钥文件）分列两条断言；若后续把密钥统一收敛到 KeyProvider，应合并并同步本表 |
