@@ -12,9 +12,9 @@
 | 项 | 值 |
 |---|---|
 | 阶段 | **T0 完成 → T1 进行中** |
-| 已勾选任务 | DOC-01~03、DEP-01~04、BE-00、BE-01、BE-02、**BE-03** |
-| **下一个任务** | **BE-04 数据权限（IDOR 防护）**（前置 BE-03 已齐，`CurrentUser.user_id` 是它的唯一用户来源） |
-| 测试基线 | 无 DB：`630 passed / 6 skipped`；有 DB：**`640 passed / 1 skipped`** |
+| 已勾选任务 | DOC-01~03、DEP-01~04、BE-00~**BE-04** |
+| **下一个任务** | **BE-05 通用组件**（Redis 封装 / Kafka 生产者 / 本地消息表 / traceId / sys_config 热更新） |
+| 测试基线 | 无 DB：`647 passed / 5 skipped`；有 DB：**`652 passed / 0 skipped`**（IDOR 端到端已启用） |
 | 门禁 | 文档一致性 35 项 PASS；`ruff`（含 `scripts/`）+ `pyright` 0 errors；3 个生成器 `--check` 全绿 |
 | 镜像 | **三个服务镜像已端到端验证**：build 成功 + 容器起得来 + `/health` 返回 `code=0`（见 §4.1） |
 | 仓库规模 | ≈110 个受跟踪文件（含本次新增）；服务包 3 个（backend / ai / mock 骨架齐备） |
@@ -248,28 +248,46 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 
 ---
 
-## 5. 下一步：BE-04 数据权限（IDOR 防护）
+## 4.3 本轮（2026-09-23 第四轮）：BE-04 数据权限（IDOR 防护）
+
+**交付**（验收原文：「用 A 的 Token 访问 B 的订单/地址/优惠券/会话全部 403，批量递增 ID 扫描无一条越权数据泄露」）：
+
+| 文件 | 职责 |
+|---|---|
+| `app/orm/repository.py` | **`OwnedRepository` 基类**：`scoped()` 是行级条件唯一注入点（`owner = user_id` + 有 `deleted` 列的表自动加 `alive()`）；`require()` 查不到即 403/10005，**不区分**"不存在"与"无权"；无 owner 列的模型**构造即 TypeError**。事实表（订单/支付，无 deleted 列）只注入 owner 条件 |
+| `app/core/security.py` | 用户上下文从 `aids_backend/deps.py` **上移到共享层**：S4 扫描器豁免的 `app/core/security.py` 从"悬空路径"变成真实实现（AI 服务 T5 直接复用，不必重写一份） |
+| `aids-backend/aids_backend/deps.py` | 薄转出（对象身份不变，`dependency_overrides` 行为不受影响） |
+| `tests/invariants/test_idor_guard.py` | ① S4 扫描面从只扫 `app/` 扩到 `scan_targets()`（**此前整个服务层不在 IDOR 扫描范围**，与 HANDOFF §9 同型缺口）；② 删除 skip，端到端落地：探针路由 + 按编译参数模拟行级过滤的会话替身，50 连发递增 ID 扫描全 403/10005、响应体无 B 的任何字段、"不存在"与"无权"逐字节一致 |
+| `tests/invariants/test_owned_repository.py` | 机制级：编译 SQL 断言（主数据表 = owner + alive；事实表 = 仅 owner；公共表构造即炸）；`get()` 必须**单条查询**同时带 id 与 user_id（防"先查后比"的多查询窗口） |
+
+**两个要记住的点**：
+
+1. **越权防线现在的完整链路**：`get_current_user`（JWT → userId）→ `OwnedRepository`（SQL 注入 `WHERE user_id=?`）→ `require()`（查不到 = 10005/403）。业务代码**不允许**出现第三种取 userId 的方式，也**不允许**绕过 `scoped()` 手写查询（S4 扫描器扫全部服务包，code review 把关）。
+2. **新发现并登记的集成缺口**（非 BE-04 范围，见 §6）：nginx `location /api/` 无 rewrite，而后端路由挂在 `/user`、`/auth` 等无 `/api` 前缀下 → 经网关访问会 404。
+
+**验证**：`task_runner verify` 8/8 PASS；pytest `647/5`（无 DB）、`652/0`（带库，原 IDOR skip 已消除）；pyright 0 errors。
+
+---
+
+## 5. 下一步：BE-05 通用组件
 
 **验收原文**（`docs/TASKS.md`）：
 
-> 按 PRD §2.2：SQLAlchemy 统一查询过滤器（Repository 基类）统一注入行级条件，
-> 业务代码禁止从请求参数读 userId 做权限判断；资源访问一律 `WHERE id=? AND user_id=?`，
-> 查不到返回 403；**验收：用 A 的 Token 访问 B 的订单/地址/优惠券/会话全部 403，
-> 批量递增 ID 扫描无一条越权数据泄漏**
+> Redis 封装（分布式锁/Lua 脚本）、Kafka 生产者封装（acks=all + 幂等）、
+> 本地消息表投递与重试任务、短信服务抽象接口、traceId 全链路注入
+> （Nginx→主业务→AI/Mock）、sys_config 动态配置读取 + Redis 发布订阅热更新
 
-开工前建议先读（下表是只读侦察的确认结果，省你一次翻查）：
+开工前建议先读（只读侦察确认过的事实，省一次翻查）：
 
 | 事实 | 说明 |
 |---|---|
-| `aids-backend/aids_backend/deps.py` | `CurrentUser.user_id` 是**唯一**允许的用户来源；BE-04 的 Repository 过滤器只从这里取 |
-| `app/orm/session.py` | 会话 DI 函数名是 **`get_db`**（不是 `get_session`）；另有 `session_scope()`（自动 commit/rollback）、`get_engine()`、`dispose_engine()` |
-| `app/orm/soft_delete.py` | 过滤器函数是 **`alive(stmt, model)`**；**刻意没有全局隐式过滤**（默认不过滤）；对无 `deleted` 列的表抛 `TypeError` |
-| `app/core/exceptions.py` | 越权用 `BusinessError.data_forbidden()`（10005）：措辞刻意不暴露资源是否存在 |
-| 权限模型是**两层** | C 端 `BizUser` **无 role 列**；B 端角色经 `SysUserRole` 关联，`data_scope` 在 `SysRole.data_scope`。BE-04 的 `WHERE user_id=?` 针对 C 端自有资源，B 端 `data_scope` 是另一套，**不要混谈** |
-| `tests/invariants/test_idor_guard.py` | ① `class TestIdorEndToEnd` 有 `pytest.mark.skip(…待 T1 BE-04…)` 占位，`test_batch_ascending_id_scan_no_leak` 目前 `raise NotImplementedError` → BE-04 做完去掉 skip；② 该文件的**豁免路径写的是 `app/core/security.py`，而该文件不存在**（悬空豁免）——BE-04 顺带修正（悬空豁免会让扫描器看起来"留了口子"） |
-| 参考文档 | `docs/PRD.md` §2.2 与 §12.4、`docs/API.md` §1.3 的 `10005` |
+| `app/core/refresh_store.py` | 本仓**第一份** Redis 客户端代码（redis 8.1，`decode_responses=True`，进程级单例）——BE-05 的通用封装应**吸收**它而不是另起一套 |
+| compose 的 redis | `redis:7.4-alpine` + 密码 + AOF + `noeviction`（预扣库存 key 不能被淘汰）；连接串见根 `.env.example` 的 `REDIS_URL` |
+| `docs/PRD.md` §5.3/§5.5 | Kafka topic 清单与消息体已定稿（`order.created` 等）；`product.changed` 已撤销（搜索走同库全文索引） |
+| `deploy/nginx/conf.d/default.conf` | `X-Trace-Id` 透传已在 Nginx 侧，后端要接住生成/回传（traceId 全链路的后半段） |
+| `app/core/config.py` | 动态配置的骨架是环境变量；`sys_config` 热更新接在它旁边，不要推翻现有读取方式 |
 
-**BE-03 带来的解锁**：`FE-02`（axios 无感刷新）与 `BE-30`（RBAC）都依赖 BE-03，现已就绪。
+**BE-03/BE-04 带来的解锁**：`FE-02`（axios 无感刷新）、`BE-30`（RBAC）依赖 BE-03 ✔；`BE-07` 起的自有资源接口依赖 BE-04 的 `OwnedRepository` ✔。BE-05 完成后 T1 只剩 BE-06。
 
 **收尾动作（每个任务都一样，C10 门禁会拦）**：把 `TASKS.md` 里该任务勾成 ✅ 之前，
 先给覆盖其验收标准的测试加 `pytestmark = [..., pytest.mark.task("<任务号>")]`。
@@ -284,6 +302,7 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 |---|---|
 | **B4 · Ark API Key 与真实模型调用** | 按用户决定**暂缓**（本轮不动）。影响 AI-02 起的任务：本地用桩推进实现，`AI-01` 脚手架不依赖它 |
 | **B5 · 范围与工期裁决** | **已裁决（2026-09-23）**：采纳「1 人 + AI 作为第二执行者」，**范围暂不裁剪**，改由 T1 出口的实测压缩率触发分级裁剪。判据、裁剪顺序与硬底线见 `TASKS.md §工作量对账` 的「决策记录」。**T1 出口时要回来对一次账**（实测人天 vs 估算 21.5 人天） |
+| **Nginx `/api/` 前缀与后端路由不一致** | **已修复（2026-09-23，用户裁决取"nginx 剥离"方案）**：`location /api/` 加 `rewrite ^/api/(.*)$ /$1 break;`，后端路由保持无 `/api` 前缀；`/api/ai/**` 走更长前缀的独立 location，不受影响（AI 侧自带 `/api/ai` 前缀）。已实测：重建 `aids/nginx` 镜像并替换容器后，`GET /api/health` 经网关 → 后端日志为 `/health`（200），`/healthz` 200。教训已写进 `deploy/nginx/conf.d/default.conf` 的 location 注释；`API.md §1.1` 已注明剥离行为 |
 | **S1-c 与 S1-e 的口径** | `assert_required_keys_present`（Ark/字段加密密钥）与 `assert_jwt_keys_configured`（JWT 密钥文件）分列两条断言；若后续把密钥统一收敛到 KeyProvider，应合并并同步本表 |
 | **`.env.example` 与 compose 的中间件口令护栏** | 已登记为「未落地的约束」（`项目设计报告.md §9.10`），触发条件：首次部署到可被外网访问的环境前 |
 | **Nginx TLS** | 同上（443 目前是空映射） |
@@ -299,4 +318,3 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 这个仓库的价值**全押在"门禁可复现"上**：它的文档不是说明，是**会失败的断言**。
 所以改动后的正确姿势永远是——先跑 §1.2 的四项 `--check` 与 §1.3 的测试，
 红了就修，绿了再提交。别绕过门禁（`--no-verify` 之类），
-那正是这个项目从上一个项目（bysj）身上学到的唯一教训。

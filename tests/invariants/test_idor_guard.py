@@ -11,9 +11,10 @@
     bysj 的教训是"文档里写了要防，但没写测试 → 某个接口漏了没人发现"。
     遍历式扫描天然适合自动化——人手不可能试 1000 个 ID。
 
-本文件分两部分：
+本文件分三部分：
     ① 静态扫描：禁止从请求参数读 userId 做权限判断（BE-04 的硬约束）
-    ② 契约测试：越权访问必须返回 403 + 错误码 10005（待接口实现后启用）
+    ② 契约测试：越权访问必须返回 403 + 错误码 10005
+    ③ 端到端：A 的 Token 批量递增 ID 扫描，无一条越权数据泄露（BE-04 验收原文）
 """
 
 from __future__ import annotations
@@ -21,12 +22,26 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Annotated, Any
 
 import pytest
+from fastapi import APIRouter, Depends
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from aids_backend.deps import get_current_user
 from app.core.errors import CommonError
+from app.core.jwt import ACCESS_TYP, JwtKeys, encode_token
+from app.core.refresh_store import InMemoryRefreshStore
+from app.core.response import ApiResponse, ok
+from app.core.security import CurrentUser
+from app.models.biz import BizAddress
+from app.orm.repository import OwnedRepository
+from app.orm.session import get_db
+from tests.contract._targets import scan_targets
 
-pytestmark = pytest.mark.invariant
+pytestmark = [pytest.mark.invariant, pytest.mark.task("BE-04")]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 APP_DIR = PROJECT_ROOT / "app"
@@ -74,10 +89,28 @@ class TestNoUserIdFromRequest:
     """
 
     def _iter_py_files(self) -> list[Path]:
-        if not APP_DIR.exists():
-            return []
+        """扫描面 = 共享层 + 全部服务包（复用 `_targets.scan_targets()`，与 C2/C4 同口径）。
+
+        曾经只扫仓库根 `app/`：BE-01 起服务代码在 `aids-*/aids_*/` 下，
+        **完全不在扫描范围且门禁全绿** —— 与 HANDOFF §9 记录的静默缺口同型。
+        新增服务后无需登记：`scan_targets()` 自动覆盖。
+        """
         allowed = (APP_DIR / "core" / "security.py").resolve()
-        return [p for p in APP_DIR.rglob("*.py") if p.resolve() != allowed]
+        return [
+            p
+            for target in scan_targets()
+            for p in sorted(target.rglob("*.py"))
+            if p.resolve() != allowed
+        ]
+
+    def test_scan_covers_every_service_package(self) -> None:
+        """反向：服务包必须真的在扫描面内（否则本类的扫描全是空转）。"""
+        covered = {p.resolve() for p in self._iter_py_files()}
+        for pkg in scan_targets():
+            if pkg.name.startswith("aids_"):
+                assert any(
+                    p.is_relative_to(pkg.resolve()) for p in covered
+                ), f"服务包 {pkg} 不在 IDOR 扫描面内 —— 服务层的越权代码将无人检查"
 
     def test_no_user_id_parameter_extraction(self) -> None:
         """扫描 `request.args.get("user_id")` / `body.get("userId")` / `payload["user_id"]`。"""
@@ -113,7 +146,7 @@ class TestNoUserIdFromRequest:
             except SyntaxError:
                 continue
             for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name in {
                     "get_user_id",
                     "parse_user_id",
                     "extract_user_id",
@@ -200,27 +233,180 @@ class TestIdorResponseContract:
 
 
 # =====================================================================
-# ③ 待接口实现后启用的端到端脚手架
+# ③ 端到端：越权遍历扫描（BE-04 验收原文的直接代码化）
 # =====================================================================
 
 
-@pytest.mark.skip(reason="待 T1 BE-04 实现数据权限拦截器后启用（当前 0 业务代码）")
-class TestIdorEndToEnd:
-    """越权遍历扫描（BE-04 验收标准的直接代码化）。
+class _FakeResult:
+    def __init__(self, item: object) -> None:
+        self._item = item
 
-    实现后应：
-        1. 用 A 的 Token 遍历递增 ID，访问 B 的资源
-        2. 断言全部返回 403 + code=10005
-        3. 断言响应体不包含任何 B 的数据字段
+    def scalar_one_or_none(self) -> Any:
+        return self._item
+
+
+class _FakeSession:
+    """不连库的会话替身：按 SQL 参数模拟数据库的行级过滤。
+
+    OwnedRepository 生成的语句带 `user_id = :user_id_1` 参数 —— 这里检查编译后的
+    参数中**user_id 列**的值是否等于"行主人"：匹配才返回行，否则 None。
+    于是「A 扫 B 的资源」与「B 读自己的资源」走**同一段被测代码**，
+    差别只在参数 —— 这正是数据库的真实行为，而不是替身另写一套逻辑。
     """
 
-    PROTECTED_RESOURCES = (
-        "/api/order/{id}",
-        "/api/address/{id}",
-        "/api/coupon/{id}",
-        "/api/ai/conversation/{id}",
+    def __init__(self, row: SimpleNamespace) -> None:
+        self._row = row
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        params = stmt.compile().params
+        hit = any(
+            str(key).startswith("user_id") and value == self._row.user_id
+            for key, value in params.items()
+        )
+        return _FakeResult(self._row if hit else None)
+
+
+# 数据库里"存在"的那条资源：属于用户 B（含只有主人该看到的字段）
+# 列名对齐 biz_address（receiver / detail）；刻意不含 phone（密文）——探针也不回传敏感字段
+_B_ADDRESS = SimpleNamespace(
+    id=5001,
+    user_id=8002,
+    receiver="用户B的收货人",
+    detail="B 的收货地址（泄露即事故）",
+    deleted=0,
+)
+USER_A = 8001  # 扫描发起者（不是资源主人）
+USER_B = 8002  # 资源主人
+
+
+class _AddressRepo(OwnedRepository[BizAddress]):
+    model = BizAddress
+
+
+def _probe_router() -> APIRouter:
+    """探针路由：一个"用户自有资源"的标准实现，与未来的订单/地址/优惠券接口同构。
+
+    响应体刻意带 `receiver_name` —— 验收要求"响应体不包含 B 的数据字段"，
+    得先有可泄露的字段，断言才有意义。
+    """
+    router = APIRouter()
+
+    @router.get("/probe/owned/{pk}")
+    async def _get_owned(
+        pk: int,
+        current_user: Annotated[CurrentUser, Depends(get_current_user)],
+        session: Annotated[AsyncSession, Depends(get_db)],
+    ) -> ApiResponse:
+        repo = _AddressRepo(session, current_user.user_id)
+        address = await repo.require(pk)
+        return ok(
+            {
+                "id": address.id,
+                "user_id": address.user_id,
+                "receiver": address.receiver,
+            }
+        )
+
+    return router
+
+
+@pytest.fixture
+def keys() -> JwtKeys:
+    return JwtKeys.generate()
+
+
+@pytest.fixture
+def store() -> InMemoryRefreshStore:
+    return InMemoryRefreshStore()
+
+
+@pytest.fixture
+def idor_client(keys: JwtKeys, store: InMemoryRefreshStore) -> TestClient:
+    """真实 app + 探针路由；密钥 / 吊销存储 / 数据库会话三处依赖替换为可控替身。"""
+    from aids_backend.app_factory import create_app
+    from aids_backend.deps import get_jwt_keys, get_refresh_store
+    from app.orm.session import get_db
+
+    app = create_app()
+    app.include_router(_probe_router())
+    app.dependency_overrides[get_jwt_keys] = lambda: keys
+    app.dependency_overrides[get_refresh_store] = lambda: store
+
+    session = _FakeSession(_B_ADDRESS)
+
+    async def _fake_db() -> Any:
+        yield session
+
+    app.dependency_overrides[get_db] = _fake_db
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _token(keys: JwtKeys, user_id: int) -> str:
+    return encode_token(
+        keys, typ=ACCESS_TYP, user_id=user_id, roles=("user",), ttl=600, jti="jti", sid="sid"
     )
 
-    def test_batch_ascending_id_scan_no_leak(self) -> None:
-        """遍历式 IDOR 扫描：批量递增 ID 无一条越权数据泄露。"""
-        raise NotImplementedError("待 BE-04 实现后填充")
+
+def _auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestIdorEndToEnd:
+    """验收原文：「用 A 的 Token 访问 B 的订单/地址/优惠券/会话全部 403，
+    批量递增 ID 扫描无一条越权数据泄露」。
+
+    订单/地址/优惠券/会话的真实业务接口属 BE-08/BE-19 等任务；本类用
+    **同一套 Repository 基类** + 探针路由先行固化机制，后续每个自有资源接口
+    必须复用这条路径（S4 扫描器 + code review 保证，不靠自觉）。
+    """
+
+    def test_owner_can_read_own_resource(self, idor_client: TestClient, keys: JwtKeys) -> None:
+        """正向对照：B 读自己的资源必须 200 —— 缺了它，"必须失败"的断言没有意义。"""
+        response = idor_client.get(
+            f"/probe/owned/{_B_ADDRESS.id}", headers=_auth(_token(keys, USER_B))
+        )
+        assert response.status_code == 200
+        assert response.json()["code"] == 0
+        assert response.json()["data"]["receiver"] == _B_ADDRESS.receiver
+
+    def test_foreign_resource_is_403_with_10005(
+        self, idor_client: TestClient, keys: JwtKeys
+    ) -> None:
+        response = idor_client.get(
+            f"/probe/owned/{_B_ADDRESS.id}", headers=_auth(_token(keys, USER_A))
+        )
+        assert response.status_code == 403
+        assert response.json()["code"] == int(CommonError.DATA_FORBIDDEN)
+
+    def test_missing_and_foreign_are_indistinguishable(
+        self, idor_client: TestClient, keys: JwtKeys
+    ) -> None:
+        """「不存在」与「无权」必须完全一致 —— 不一致就能枚举有效 ID。"""
+        headers = _auth(_token(keys, USER_A))
+        foreign = idor_client.get(f"/probe/owned/{_B_ADDRESS.id}", headers=headers)
+        missing = idor_client.get("/probe/owned/999999", headers=headers)
+        assert foreign.status_code == missing.status_code == 403
+        assert foreign.json() == missing.json(), "两种失败响应不一致 → 可枚举资源 ID"
+
+    def test_batch_ascending_id_scan_no_leak(self, idor_client: TestClient, keys: JwtKeys) -> None:
+        """遍历式扫描（PRD §12.4）：批量递增 ID，无一条越权数据泄露。"""
+        headers = _auth(_token(keys, USER_A))
+        leaked: list[int] = []
+        for pk in range(1, 51):
+            response = idor_client.get(f"/probe/owned/{pk}", headers=headers)
+            if response.status_code != 403 or response.json()["code"] != int(
+                CommonError.DATA_FORBIDDEN
+            ):
+                leaked.append(pk)
+            else:
+                # 响应体只能是统一响应体，且 data 必须为空 —— B 的任何字段不得出现
+                body = response.json()
+                assert set(body) == {"code", "message", "data"}
+                assert body["data"] is None
+        assert not leaked, f"以下 ID 未被拦截（越权泄露）：{leaked}"
+
+    def test_missing_token_is_401_not_403(self, idor_client: TestClient) -> None:
+        """未登录是 401（10002），不要混进"越权"（403）——前端对两者的处理不同。"""
+        response = idor_client.get("/probe/owned/1")
+        assert response.status_code == 401
+        assert response.json()["code"] == int(CommonError.UNAUTHORIZED)
