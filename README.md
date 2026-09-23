@@ -223,6 +223,10 @@ alembic -c aids-backend/alembic.ini upgrade head --sql       # 只打印 SQL（�
 
 ## 相关文档
 
+> **新接手本项目（或新的 AI 会话）请先读 [开发交接（HANDOFF）](docs/HANDOFF.md)** ——
+> 现状、上手命令、本机环境特有的坑、下一步任务，都在那一份里。
+
+- [开发交接（HANDOFF）](docs/HANDOFF.md) — ★ 接手必读：现状 / 上手三步 / 环境坑 / 下一步
 - [工程化门禁方案](docs/工程化门禁方案.md) — 本门禁体系为什么这样设计
 - [项目设计报告](docs/项目设计报告.md) — 逐文件职责说明 + 两轮核查发现的优化清单（§11）
 - [PRD](docs/PRD.md) — 需求与技术架构
