@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from aids_backend.api import MODULE_ROUTERS
 from aids_backend.app_factory import create_app
@@ -88,10 +89,14 @@ class TestHealthEndpointContract:
             "curl -sf http://localhost:PORT/path —— 测试无法定位探针路径"
         )
 
-        registered = {route.path for route in create_app().routes if hasattr(route, "path")}
-        assert match.group("path") in registered, (
-            f"Dockerfile 探针路径 {match.group('path')} 未在应用中注册；"
-            f"当前已注册：{sorted(registered)}"
+        # 用「发请求」判断探针是否真的可达，而不是遍历 app.routes：
+        # fastapi >= 0.14x 的 include_router 结果被包成惰性 _IncludedRouter
+        # （没有 .path 属性），遍历 routes 会漏掉全部子路由，得到假阴性。
+        probe_path = match.group("path")
+        response = TestClient(create_app(), raise_server_exceptions=False).get(probe_path)
+        assert response.status_code == 200, (
+            f"Dockerfile 探针路径 {probe_path} 未在应用中注册（返回 {response.status_code}）"
+            f"—— 容器会被判定为 unhealthy 并反复重启"
         )
 
     def test_dockerfile_exposes_documented_port(self) -> None:
@@ -157,9 +162,7 @@ class TestStartupGuard:
 
     def test_refuses_production_db_in_test_env(self) -> None:
         """S1-d：bysj 的历史顽疾——测试跑了生产库。这里必须被代码拦住。"""
-        result = self._import_main(
-            {"APP_ENV": "test", "DATABASE_URL": "mysql://u:p@h/aids_shop"}
-        )
+        result = self._import_main({"APP_ENV": "test", "DATABASE_URL": "mysql://u:p@h/aids_shop"})
         assert result.returncode != 0, "测试环境连生产库必须拒绝启动"
         assert "启动断言失败" in (result.stdout + result.stderr)
 

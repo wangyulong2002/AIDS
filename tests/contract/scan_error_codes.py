@@ -33,6 +33,8 @@ import sys
 from pathlib import Path
 from typing import TypeGuard
 
+from tests.contract._targets import scan_targets
+
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
 # 允许出现裸错误码数字的文件——**按相对路径**豁免，不按文件名。
@@ -211,7 +213,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _default_targets() -> list[Path]:
-    return [PROJECT_ROOT / "app"]
+    # 扫描面由 tests/contract/_targets.py 统一定义：共享层 + 全部服务包。
+    # 不要在本地再写死目录列表——那正是"新增服务后无人检查"的成因。
+    return scan_targets()
 
 
 if __name__ == "__main__":

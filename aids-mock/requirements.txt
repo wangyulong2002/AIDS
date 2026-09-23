@@ -10,7 +10,7 @@
 # T1 若需按服务裁剪，改 pyproject.toml 的 extra 后重新生成。
 # =============================================================
 
-fastapi>=0.115
+fastapi>=0.115,<0.142
 uvicorn[standard]>=0.32
 gunicorn>=23.0
 pydantic>=2.9

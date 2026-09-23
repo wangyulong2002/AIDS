@@ -71,16 +71,21 @@ jobs:
         run: pip install "ruff>=0.8"
 
       - name: ruff format 检查
-        run: ruff format --check app tests
+        # `app` 是共享契约层；`aids-*` 是服务包源码目录
+        # （aids-backend/aids_backend 等）。曾经只写 `app tests`，
+        # BE-01 新增的服务代码完全不在检查范围内。
+        run: ruff format --check app tests aids-*
 
       - name: ruff lint
-        run: ruff check app tests
+        run: ruff check app tests aids-*
 
       - name: C4 错误码扫描（禁止硬编码错误码）
-        run: python -m tests.contract.scan_error_codes app
+        # 不传目录参数 = 使用 tests/contract/_targets.py 的默认扫描面
+        # （共享层 + 全部服务包）。写死 `app` 会让新增服务静默漏检。
+        run: python -m tests.contract.scan_error_codes
 
       - name: C2 状态枚举扫描（禁止魔法数字）
-        run: python -m tests.contract.scan_enum_magic_numbers app
+        run: python -m tests.contract.scan_enum_magic_numbers
 
   # ---------------------------------------------------------------
   # L2-b 契约测试 —— 本门禁的核心
@@ -165,10 +170,13 @@ jobs:
         continue-on-error: false
 
       - name: C1/C2/C4/C7/C8 契约测试（静态层）
-        run: pytest tests/contract -q -m contract
+        # 用 `tests` 而非 `tests/contract`：BE-01 起的接口层契约测试在
+        # tests/api/，同样带 contract 标记。按标记筛选比按目录筛选更耐用——
+        # 新增测试目录时不会被漏掉。
+        run: pytest tests -q -m contract
 
       - name: C1 契约测试（反射层，连真实库）
-        run: pytest tests/contract -q -m requires_mysql
+        run: pytest tests -q -m requires_mysql
 
   # ---------------------------------------------------------------
   # L2-c 不变量测试 —— 库存/幂等/退款/IDOR/启动断言

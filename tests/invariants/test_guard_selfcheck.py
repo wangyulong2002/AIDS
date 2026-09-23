@@ -30,15 +30,47 @@ from pathlib import Path
 
 import pytest
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+HOOKS_DIR = PROJECT_ROOT / "scripts" / "hooks"
+
+
+# 解析一次，全程用**绝对路径**调用 bash：
+# Windows 的 CreateProcess 解析裸名 "bash" 时会先命中
+# `C:\Windows\System32\bash.exe`（WSL 启动器），而它可能在安全策略黑名单里 ——
+# 表现为一段 UTF-16 的「拒绝访问」，经 subprocess 文本解码后炸成
+# UnicodeDecodeError，看起来完全不像环境问题。用 which() 的结果可绕开这个陷阱。
+_BASH: str | None = shutil.which("bash")
+
+
+def _bash_unavailable_reason() -> str | None:
+    """探测 bash 是否**真的可执行**（which 有结果 ≠ 跑得起来）。
+
+    实测过的两种假阳性：
+        1. 裸名 "bash" 被解析到 WSL 启动器并被安全策略阻断（见上方注释）；
+        2. 受限沙箱禁止 Python 子进程启动 bash。
+    故此处实跑一次探针，失败即 skip —— 不把环境问题伪装成代码缺陷。
+    CI（ubuntu-latest）的 bash 正常，护栏断言照常生效。
+    """
+    if _BASH is None:
+        return "本环境无 bash"
+    try:
+        probe = subprocess.run([_BASH, "-c", "true"], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"bash 存在但无法启动：{exc!r}"
+    if probe.returncode != 0:
+        return f"bash 存在但执行失败（rc={probe.returncode}，stderr={probe.stderr[:60]!r}）"
+    return None
+
+
+_BASH_UNAVAILABLE = _bash_unavailable_reason()
+
 pytestmark = [
     pytest.mark.invariant,
     pytest.mark.skipif(
-        shutil.which("bash") is None, reason="护栏 hook 是 bash 脚本，本环境无 bash"
+        _BASH_UNAVAILABLE is not None,
+        reason=f"护栏 hook 需要可执行的 bash（{_BASH_UNAVAILABLE}）",
     ),
 ]
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-HOOKS_DIR = PROJECT_ROOT / "scripts" / "hooks"
 
 
 def _tracked_files() -> list[str]:
@@ -59,11 +91,17 @@ def _tracked_files() -> list[str]:
 
 def _run_hook(hook: str, paths: list[str]) -> int:
     """按 pre-commit 的方式调用 hook（把文件名作为参数传入）。"""
+    if _BASH is None:  # pragma: no cover - 模块级 skipif 已保证
+        pytest.skip("本环境无 bash")
     proc = subprocess.run(
-        ["bash", str(HOOKS_DIR / hook), *paths],
+        [_BASH, str(HOOKS_DIR / hook), *paths],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
+        # hook 输出含中文：显式指定 UTF-8 + 容错解码，避免 Windows 上按 locale
+        # （cp936）解释 UTF-8 字节而抛 UnicodeDecodeError。
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     return proc.returncode

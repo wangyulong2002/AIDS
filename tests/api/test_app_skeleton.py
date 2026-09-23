@@ -134,7 +134,12 @@ class TestBusinessErrorStatusMapping:
         assert BusinessError(code, "x").resolved_http_status == 200
 
     def test_explicit_override_wins(self) -> None:
-        assert BusinessError(int(ProductError.STOCK_INSUFFICIENT), "x", http_status=409).resolved_http_status == 409
+        assert (
+            BusinessError(
+                int(ProductError.STOCK_INSUFFICIENT), "x", http_status=409
+            ).resolved_http_status
+            == 409
+        )
 
     def test_convenience_constructors_use_enum_codes(self) -> None:
         assert BusinessError.not_found().code == int(CommonError.NOT_FOUND)
@@ -249,6 +254,13 @@ class TestModuleWiring:
             assert router.prefix.startswith("/"), f"{name} 的 prefix 必须以 / 开头"
 
     def test_app_starts_with_only_health_wired(self, live_client: TestClient) -> None:
-        """BE-01 是脚手架：六个模块只建分组、暂无接口，故只有 /health 可达。"""
-        paths = {route.path for route in live_client.app.routes if hasattr(route, "path")}
-        assert "/health" in paths
+        """BE-01 是脚手架：六个模块只建分组、暂无接口，故只有 /health 可达。
+
+        用「发请求」而非遍历 `app.routes` 断言：fastapi >= 0.14x 把 include_router
+        的结果包成惰性 `_IncludedRouter`（**没有 `.path` 属性**），遍历 routes 会
+        静默漏掉全部子路由，得到「/health 未注册」的假阴性 —— 结构断言在这里
+        既不稳也没必要。
+        """
+        assert live_client.get("/health").status_code == 200
+        for prefix in sorted(router.prefix for router in MODULE_ROUTERS.values()):
+            assert live_client.get(prefix).status_code == 404, f"{prefix} 下已有接口，请更新本测试"

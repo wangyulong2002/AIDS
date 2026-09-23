@@ -9,6 +9,9 @@
 #   本 hook 用 `_*` 作为"下划线开头即残留"的粗判，但有两类下划线文件是合法的：
 #     __init__.py                    —— 包标识，任何目录都必须入库
 #     tests/contract/_doc_parser.py  —— 契约测试公共解析器（命名以 _ 开头是刻意的）
+#     tests/contract/_targets.py     —— 扫描面枚举，被两个 scan_*.py import
+#                                       （原名 _scan_targets.py 撞上 .gitignore 的
+#                                        `**/_scan_*.py`，见 HANDOFF §8.2）
 #   历史教训：没有白名单时，本 hook 会把上面两个文件判为"残留文件"，
 #   于是**任何对它们的改动都无法提交**——护栏误伤了自己仓库里合法的东西，
 #   这是比自己没生效更隐蔽的失效（开发者的"绕过"方式往往是 --no-verify，
@@ -22,6 +25,7 @@ _is_whitelisted() {
   local path="$1" base="$2"
   [ "$base" = "__init__.py" ] && return 0
   [ "$path" = "tests/contract/_doc_parser.py" ] && return 0
+  [ "$path" = "tests/contract/_targets.py" ] && return 0
   return 1
 }
 

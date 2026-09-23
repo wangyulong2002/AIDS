@@ -63,20 +63,21 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(BusinessError)
     async def _handle_business_error(request: Request, exc: BusinessError) -> JSONResponse:
-        status = exc.resolved_http_status
+        # 变量名用 http_code 而非 status：C2 扫描器按字段名子串判定（_STATUS_FIELD_HINTS
+        # 含 "status"），叫 status / http_status 会让 HTTP 状态码被误判成业务状态枚举的
+        # 魔法数字。改名而不是加 `# enum-ok` —— 到处加豁免会让门禁名存实亡（HANDOFF §8.3）。
+        http_code = exc.resolved_http_status
         # 按结果分级，否则线上「按 error 级别告警」会被用户的正常操作失败淹没：
         #   5xx → 真故障（需人工介入）  4xx → 调用方问题  200 → 正常业务分支
-        if status >= 500:
-            logger.error(
-                "业务异常 code=%s path=%s msg=%s", exc.code, request.url.path, exc.message
-            )
-        elif status >= 400:
+        if http_code >= 500:
+            logger.error("业务异常 code=%s path=%s msg=%s", exc.code, request.url.path, exc.message)
+        elif http_code >= 400:
             logger.warning(
                 "业务异常 code=%s path=%s msg=%s", exc.code, request.url.path, exc.message
             )
         else:
             logger.info("业务失败 code=%s path=%s msg=%s", exc.code, request.url.path, exc.message)
-        return _envelope(exc.code, exc.message, exc.data, status)
+        return _envelope(exc.code, exc.message, exc.data, http_code)
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(
@@ -99,9 +100,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return _envelope(int(CommonError.PARAM_INVALID), "参数校验失败", detail)
 
     @app.exception_handler(StarletteHTTPException)
-    async def _handle_http_exception(
-        request: Request, exc: StarletteHTTPException
-    ) -> JSONResponse:
+    async def _handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         """框架自身抛出的 HTTPException（如路由未命中）也要包成统一响应体。"""
         code = _STATUS_TO_CODE.get(exc.status_code, int(CommonError.SYSTEM_BUSY))
         message = _STATUS_TO_MESSAGE.get(exc.status_code, str(exc.detail))
