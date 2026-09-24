@@ -3,7 +3,7 @@
 #
 # 设计见 docs/工程化门禁方案.md：
 #   L1 pre-commit（本地，< 5s）—— 见 .pre-commit-config.yaml
-#   L2 PR（本文件 docs / lint / contract / invariants / typecheck / images，< 10min）
+#   L2 PR（本文件 docs / lint / contract / invariants / typecheck / images / frontend，< 10min）
 #   L3 merge 到 main（smoke：真拉起最小档 compose，< 15min）
 #
 # 核心思想：约束产出（代码能不能过检查），而非约束输入（AI 读没读文档）。
@@ -313,6 +313,57 @@ jobs:
         run: docker rm -f smoke-${{ matrix.service }} || true
 
   # ---------------------------------------------------------------
+  # L2-f 前端工程（FE-01 / FE-02）
+  #
+  # 为什么单列一个 job（与 images job 同理）：
+  #   两个前端工程（aids-mall / aids-admin）是纯 TS/Vue 交付物 —— Python 侧三道门禁
+  #   （ruff / pyright / pytest）照不到它们。tests/contract/test_frontend_scaffold.py
+  #   只能断言「结构与源码不变量」（工程独立、依赖齐全、单飞刷新、401 重放），
+  #   而**并发语义**必须由真实工具链跑 `vitest` 才算数（"同时 N 个 401 只刷新一次"
+  #   这种不变量，静态看代码看不出对错）。故这里真的 install → lint → test → build。
+  #
+  # npm ci 依赖 package-lock.json（两个工程均已入库）——锁文件缺失会让本 job 直接红，
+  # 而不是悄悄退回 npm install 装出一棵与本地不同的依赖树。
+  # ---------------------------------------------------------------
+  frontend:
+    name: Frontend (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: aids-mall
+          - app: aids-admin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: 安装依赖（按锁文件，本地/CI 依赖树一致）
+        working-directory: ${{ matrix.app }}
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint（ESLint 9 flat config）
+        working-directory: ${{ matrix.app }}
+        run: npm run lint
+
+      - name: 格式检查（Prettier）
+        working-directory: ${{ matrix.app }}
+        run: npm run format:check
+
+      - name: 单测（vitest：无感刷新单飞 + 并发排队）
+        working-directory: ${{ matrix.app }}
+        run: npm test
+
+      - name: 类型检查 + 构建（vue-tsc + vite）
+        working-directory: ${{ matrix.app }}
+        run: npm run build
+
+  # ---------------------------------------------------------------
   # L3 冒烟：仅 main 分支，真拉起 compose 最小档
   #
   # 应用服务的端到端链路（登录 → 下单 → 支付回调）待 T3 补齐后替换；
@@ -364,7 +415,7 @@ jobs:
   gate:
     name: 门禁汇总
     if: always()
-    needs: [docs, lint, contract, invariants, typecheck, images]
+    needs: [docs, lint, contract, invariants, typecheck, images, frontend]
     runs-on: ubuntu-latest
     steps:
       - name: 检查所有门禁任务

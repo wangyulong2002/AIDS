@@ -8,7 +8,7 @@
     本脚本只固定机械部分：
 
         card  <任务号>   任务卡：依赖检查 + 落测试位置 + 必须跑的门禁 + 提交信息模板
-        verify           依次跑完整门禁链（四项 --check + ruff + pyright + 全量测试）
+        verify           依次跑完整门禁链（四项 --check + ruff + C2/C4 扫描器 + pyright + 全量测试）
         list  [--tier]   按梯次列出任务与状态，便于挑下一个
 
     判断部分（写"会失败的测试"、实现、设计取舍）仍由人/AI 完成。
@@ -191,6 +191,23 @@ def _run_step(name: str, argv: list[str]) -> bool:
     return False
 
 
+def _pytest_basetemp() -> Path:
+    """每次运行使用**独立**的 basetemp 目录。
+
+    为什么不用固定路径（2026-09-24 实测的真实事故）：
+        pytest 在首次使用 `--basetemp` 时会先 `rm_rf` 整个目录再重建。本机受宿主机
+        "批量删除守卫"约束，对固定路径（`%TEMP%/aids-task-runner-pytest`）的删除会
+        **部分失败**，残留上一轮的 `test_xxx0` / `test_xxxcurrent` 目录；随后
+        mktemp 创建同名目录即 `FileExistsError` —— 表现为**随机 34 个 `tmp_path`
+        用例 ERROR**（`test_error_codes.py` / `test_startup_assertions.py` /
+        `test_mock_payment.py`），而再跑一次又全绿（残留已被上一轮删净）。
+
+        一个"跑第二次才会绿"的门禁等于没有门禁 —— 它会训练人把红当作噪音，
+        正是本项目最想避免的失效模式。故改为每轮唯一目录：既不删除、也不复用。
+    """
+    return Path(tempfile.gettempdir()) / f"aids-verify-pytest-{os.getpid()}-{int(time.time())}"
+
+
 def cmd_verify(_: argparse.Namespace) -> int:
     python = sys.executable
     ruff = _tool("ruff")
@@ -200,7 +217,7 @@ def cmd_verify(_: argparse.Namespace) -> int:
         print(f"[task_runner] 未找到 {missing} —— 请确认在仓库 venv 内运行（见 README 快速开始）")
         return 1
 
-    basetemp = Path(tempfile.gettempdir()) / "aids-task-runner-pytest"
+    basetemp = _pytest_basetemp()
     steps: list[tuple[str, list[str]]] = [
         ("文档一致性门禁", [python, "docs/tools/gen_data_dictionary.py", "--check"]),
         ("依赖清单一致性", [python, "scripts/gen_requirements.py", "--check"]),
@@ -208,6 +225,13 @@ def cmd_verify(_: argparse.Namespace) -> int:
         ("ORM 模型一致性", [python, "scripts/gen_orm_models.py", "--check"]),
         ("ruff format", [str(ruff), "format", "--check", *RUFF_TARGETS]),
         ("ruff lint", [str(ruff), "check", *RUFF_TARGETS]),
+        # C2/C4 两个扫描器此前**只**在 CI 的 lint job 与 pre-commit 里跑，`verify` 漏掉了它们
+        # —— 于是出现「verify 8/8 全绿、CI 却红」的错位（2026-09-24 实测：Mock 的
+        # `status_code == 200` 被 C2 判为业务状态魔法数字，verify 全程看不见）。
+        # `verify` 自称"与 CI 的 L2 同序"，那就必须真的同序；漏一项就等于给了一个
+        # 会骗人的绿灯。默认扫描面由 tests/contract/_targets.py 提供（共享层 + 全部服务包）。
+        ("C4 错误码扫描", [python, "-m", "tests.contract.scan_error_codes"]),
+        ("C2 状态枚举扫描", [python, "-m", "tests.contract.scan_enum_magic_numbers"]),
         ("pyright（basic）", [str(pyright)]),
         ("全量测试", [python, "-m", "pytest", "tests", "-q", f"--basetemp={basetemp}"]),
     ]
