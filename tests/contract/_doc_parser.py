@@ -20,6 +20,7 @@ DOCS: Path = PROJECT_ROOT / "docs"
 DATA_DICTIONARY: Path = DOCS / "DATA-DICTIONARY.md"
 API_DOC: Path = DOCS / "API.md"
 SCHEMA_SQL: Path = DOCS / "sql" / "schema.sql"
+MOCK_SCHEMA_SQL: Path = DOCS / "sql" / "mock_schema.sql"
 
 
 # ---------------------------------------------------------------------
@@ -266,15 +267,17 @@ _CREATE_TABLE = re.compile(
     re.DOTALL,
 )
 
+# DDL 行首不是字段名的关键字（PRIMARY KEY / UNIQUE KEY / KEY / INDEX …）
+_NON_COLUMN_HEADS = frozenset(
+    {"PRIMARY", "UNIQUE", "INDEX", "KEY", "CONSTRAINT", "CHECK", "FULLTEXT"}
+)
 
-@lru_cache(maxsize=1)
-def parse_schema_tables() -> dict[str, list[str]]:
-    """解析 docs/sql/schema.sql，返回 { 表名: [字段名, ...] }。
+
+def _tables_from_sql(sql: str) -> dict[str, list[str]]:
+    """从 DDL 文本解析 { 表名: [字段名, ...] }（供主库与 Mock 库共用）。
 
     字段名来源：行首反引号包裹的第一列标识符。
-    排除 ``PRIMARY KEY`` / ``UNIQUE KEY`` / ``INDEX`` / ``KEY`` / ``CONSTRAINT`` / ``CHECK``。
     """
-    sql = SCHEMA_SQL.read_text(encoding="utf-8")
     result: dict[str, list[str]] = {}
 
     for m in _CREATE_TABLE.finditer(sql):
@@ -287,20 +290,28 @@ def parse_schema_tables() -> dict[str, list[str]]:
             if not fm:
                 continue
             col = fm.group("col")
-            if col.upper() in {
-                "PRIMARY",
-                "UNIQUE",
-                "INDEX",
-                "KEY",
-                "CONSTRAINT",
-                "CHECK",
-                "FULLTEXT",
-            }:
+            if col.upper() in _NON_COLUMN_HEADS:
                 continue
             fields.append(col)
         result[name] = fields
 
     return result
+
+
+@lru_cache(maxsize=1)
+def parse_schema_tables() -> dict[str, list[str]]:
+    """解析 docs/sql/schema.sql，返回 { 表名: [字段名, ...] }。"""
+    return _tables_from_sql(SCHEMA_SQL.read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=1)
+def parse_mock_schema_tables() -> dict[str, list[str]]:
+    """解析 docs/sql/mock_schema.sql，返回 { 表名: [字段名, ...] }。
+
+    Mock 是**独立库**（第三方渠道视角），其 ORM 与 DDL 的一致性同样需要咬合
+    —— Mock 库漂移的症状是"渠道行为与契约不符"，比主库更难被发现。
+    """
+    return _tables_from_sql(MOCK_SCHEMA_SQL.read_text(encoding="utf-8"))
 
 
 @lru_cache(maxsize=1)
@@ -345,7 +356,16 @@ def parse_schema_unique_index_columns() -> dict[str, dict[str, tuple[str, ...]]]
     ``assert keys`` 成了唯一断言——把 ``UNIQUE KEY (idempotent_key)``
     误建成 ``UNIQUE KEY (id)`` 也照样通过。
     """
-    sql = SCHEMA_SQL.read_text(encoding="utf-8")
+    return _unique_index_columns_from_sql(SCHEMA_SQL.read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=1)
+def parse_mock_schema_unique_index_columns() -> dict[str, dict[str, tuple[str, ...]]]:
+    """解析 mock_schema.sql 中每个 UNIQUE 索引的列清单（Mock 幂等键的同一判据）。"""
+    return _unique_index_columns_from_sql(MOCK_SCHEMA_SQL.read_text(encoding="utf-8"))
+
+
+def _unique_index_columns_from_sql(sql: str) -> dict[str, dict[str, tuple[str, ...]]]:
     result: dict[str, dict[str, tuple[str, ...]]] = {}
 
     for m in _CREATE_TABLE.finditer(sql):
