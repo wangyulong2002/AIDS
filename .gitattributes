@@ -1,0 +1,43 @@
+# =============================================================
+# 行尾与文本属性统一口径（T1 / BE-37）
+#
+# 为什么必须有这个文件（真实事故，症状链）：
+#   Windows 侧 git 默认 core.autocrlf=true —— 文件以 CRLF 检出，而编辑器 / AI
+#   写入的是 LF，于是**同一个文件同时含 CRLF 与 LF**。后果是链式的：
+#     ① pre-commit 的 mixed-line-ending 每次都要"修正"，而它修的就是行尾；
+#     ② 每次修正都把 diff 变成「所有行都改了」，功能改动被行尾噪音淹没；
+#     ③ git add 时 autocrlf 又要把 CRLF 压成 LF，与库内既有 blob（CRLF）不一致
+#        —— 于是"改一行"表现为"整个文件重写"；
+#     ④ 提交因此反复被拦下（HANDOFF §6 登记的顽疾，实测能连拦 3 轮）。
+#
+# 显式 eol=lf 之后：**工作区与库内都是 LF**，混合行尾不再产生，
+# mixed-line-ending 与 git diff 的结论也就稳定一致 —— 这才是根治。
+#
+# 生效边界（重要）：
+#   本文件只管**此后**的 add / checkout。库内既有的混合行尾 blob 需要一次
+#   `git add --renormalize .` 归一（BE-37 已执行），之后 `git checkout -- .`
+#   把工作区刷成 LF。
+#   今后**不要**再依赖 core.autocrlf：仓库口径由本文件决定，与开发者本机配置解耦。
+# =============================================================
+
+# 默认：文本归一为 LF（二进制由 git 按内容自动识别，text=auto）
+* text=auto eol=lf
+
+# 项目脚本必须保持 LF（在 Linux 容器里执行；CRLF 会导致 bad interpreter）
+*.sh   text eol=lf
+
+# 显式声明为二进制：不做任何行尾转换与文本 diff
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.jar   binary
+*.zip   binary
+*.gz    binary

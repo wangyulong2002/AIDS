@@ -41,7 +41,7 @@ EXPECTED = {
     "enum_groups": 11,
     "invariants": 12,
     "services": 9,
-    "tasks": 97,
+    "tasks": 98,
     "pitfalls": 11,
 }
 

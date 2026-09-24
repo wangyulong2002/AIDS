@@ -18,7 +18,7 @@
 | 文件 | 当前版本 | 上次修订 | 本轮修订原因 |
 |------|----------|----------|--------------|
 | [PRD.md](PRD.md) | **v1.4** | 2026-09-23 | §15 #6 开发人力由「待裁决」转「已决策」：1 人 + AI 作为第二执行者；范围暂不裁剪，改由 T1 出口实测触发分级裁剪 |
-| [TASKS.md](TASKS.md) | **v2.2** | 2026-09-23 | §工作量对账 增补「决策记录」（人力口径与触发条件）；任务编号与总数仍是 97 |
+| [TASKS.md](TASKS.md) | **v2.2** | 2026-09-24 | T1 收官并增补 BE-37（行尾口径统一）；任务编号连续、总数 **98** |
 | [API.md](API.md) | **v1.1** | 2026-09-21 | §四 标题与内部调用方改「主业务 ↔ AI 服务」；Token 来源改环境变量 |
 | [DATA-DICTIONARY.md](DATA-DICTIONARY.md) | **v1.1** | 2026-09-21 | 新增 `sys_config`；37→38 表、411→419 字段；Flyway→Alembic；Java 枚举→Python str Enum |
 | [sql/schema.sql](sql/schema.sql) | **v1.2** | 2026-09-21 | 新增 `sys_config` 建表；TypeHandler→TypeDecorator |
@@ -44,7 +44,7 @@
 | 5 | 状态枚举映射组 | **11** | DATA-DICTIONARY §一 | 取 `## 一、` 至 `## 二、` 间 `^### ` 计数 | ✅ |
 | 6 | 不变量条数 | **12** | DATA-DICTIONARY §四 | `awk '/^## 四、/,0' docs/DATA-DICTIONARY.md \| grep -cE '^\| *[0-9]+ *\|'` | ✅ |
 | 7 | 中间件服务数 | **9** | compose / README 分档 / TASKS DEP-01 | `docker compose -f deploy/docker-compose.yml --profile search config --services \| wc -l` | ✅ |
-| 8 | 任务总数 | **97** | TASKS §梯次概览「总任务数」行 | `awk -F'\|' '/^\| (BE\|FE\|AI\|MOCK\|DEP\|DOC)-[0-9]+ \|/{c++} END{print c}' docs/TASKS.md` | ✅ |
+| 8 | 任务总数 | **98** | TASKS §梯次概览「总任务数」行 | `awk -F'\|' '/^\| (BE\|FE\|AI\|MOCK\|DEP\|DOC)-[0-9]+ \|/{c++} END{print c}' docs/TASKS.md` | ✅ |
 | 9 | 总工期 | **17 周** | PRD §11 / PRD §15 #6 / TASKS 概览 | `grep -c '17 周' docs/PRD.md docs/TASKS.md` 且不得出现「16 周」结论 | ✅ |
 | 10 | 全量档内存口径 | **宿主可用 ≥6GB（8GB 舒适）**；容器空载实测 ≈1.5GB（默认档 ≈0.9GB） | PRD §13 / §15 / README 分档表 / compose 头部 | `grep -rn '≥ 6GB\|≥6GB' docs/PRD.md deploy/README.md deploy/docker-compose.yml` | ⬜ 人工 |
 | 11 | 三服务端口 | 主业务 **8080** / AI **8000** / Mock **8081**（前端另有 80，不计入） | PRD §5.3 / API 头部 / 各 Dockerfile EXPOSE | `grep -h EXPOSE deploy/app/backend.Dockerfile deploy/app/ai.Dockerfile deploy/app/mock.Dockerfile` | ✅ |
@@ -68,6 +68,7 @@
 | v1.3 收尾 | 2026-09-21 | 按 `文档质量锐评.md` 修复：内存口径统一、工期残留、`data_scope` 退化定义、成本上界、本版本矩阵 | 无表/服务数变化；DD·seed·mock_schema 版本补齐 v1.1 |
 | 门禁常量订正 | 2026-09-22 | ① `README.md` / `工程化门禁方案.md` 的「10 组」旧写法统一为 **11 组**；② TASKS 计数订正（增补 `BE-00` 后锚点未同步）；③ 移除审校快照文件及其全部悬空引用 | TASKS 总数 96→**97**（板块 BE 36→**37**、T1 梯次 12→**13**）；枚举组数 / 表数 / 字段数 / 服务数无变化 |
 | **v1.4 / v2.2** | 2026-09-23 | **开发人力口径定稿**（PRD §15 #6）：采纳「1 人 + AI 作为第二执行者」，范围暂不裁剪，改由 T1 出口的实测压缩率触发分级裁剪（判据见 TASKS §工作量对账「决策记录」）；同批落地 C9~C12 契约测试与三服务骨架（详见 HANDOFF §0.1） | 无表 / 字段 / 枚举 / 服务数变化；任务总数仍为 **97**；工期头条不变 |
+| **v2.2 增补** | 2026-09-24 | **T1 收官**，并增补 `BE-37`（行尾口径统一：`.gitattributes` + 一次性 renormalize —— 根治"提交被 mixed-line-ending 反复拦下"）；同批落地 `MOCK-01~03` 测试修复、`AI-01` 结构化日志与配置隔离、`FE-01/02` 双前端工程（详见 HANDOFF §4.7） | 无表 / 字段 / 枚举 / 服务数变化；任务总数 97 → **98**（T1 梯次 13 → 14，BE 板块 37 → 38） |
 
 ---
 
