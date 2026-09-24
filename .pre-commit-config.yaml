@@ -48,8 +48,18 @@ repos:
         pass_filenames: true
 
   # ---- ruff：格式 + lint ----
+  #
+  # ★ rev 必须与 constraints.txt 的 `ruff==` 锁保持一致 ★
+  #   曾经 rev 停在 v0.8.4，而 constraints.txt 锁 0.16.x —— 于是同一个文件在
+  #   pre-commit（v0.8.4）与 CI / 本地（0.16.x）被判成**两种格式**，来回互相改。
+  #   分歧根因是**中文字符显示宽度**：两版算法不同，`assert <条件>, "<长中文消息>"`
+  #   一边算得下、一边算不下（v0.8.4 按宽 1 计，v0.16.x 按宽 2 计）。
+  #   症状极隐蔽：pre-commit 报 "Passed" 却已改写文件内容，随后 `task_runner verify`
+  #   的 `ruff format --check` 立刻红，形成"改了又红、红了又改"的循环。
+  #   constraints.txt 已锁 0.16.8（由 gen_constraints.py 从当前环境生成），
+  #   本 rev 与其同步 —— **今后升级 ruff 必须同时改这两处**。
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.16.8
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
