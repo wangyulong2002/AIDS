@@ -3,7 +3,7 @@
 > **这份文档与工具无关。** 面向任何接手本仓库的开发者或 AI 会话。
 > 上一个会话用的是 WorkBuddy，其工作日志留在 `.workbuddy/memory/`（内容已提炼到本文件，可仅作参考）。
 >
-> 最后更新：2026-09-23（第三轮：B5 裁决落纸 + 协作治具 + BE-03 鉴权模块）· 各轮提交见 `git log`，现状只看 §0
+> 最后更新：2026-09-24（T1 剩余项：MOCK-01~03 代码已落地、测试待修；**工作区未提交**）· 各轮提交见 `git log`，现状只看 §0
 
 ---
 
@@ -11,17 +11,20 @@
 
 | 项 | 值 |
 |---|---|
-| 阶段 | **T0 完成 → T1 进行中** |
-| 已勾选任务 | DOC-01~03、DEP-01~04、**BE-00~BE-06（T1 的 BE 线收官）** |
-| **下一个任务** | T1 剩余 6 项：**MOCK-01~03 / FE-01~02 / AI-01**；全部完成后做 **T1 出口对账** |
-| 测试基线 | 无 DB：`722 passed / 5 skipped`；有 DB：**`727 passed / 0 skipped`** |
+| 阶段 | **T0 完成 → T1 进行中（BE 线收官，Mock 线实现已落地但测试未全绿）** |
+| 已勾选任务 | DOC-01~03、DEP-01~04、**BE-00~BE-06** |
+| **下一个任务** | **修 Mock 三服务的 6 个失败用例**（§4.6 有逐条根因）→ 续做 **AI-01 差量 / FE-01 / FE-02** → 勾选 MOCK-01~03 → **T1 出口对账** |
+| 测试基线 | **工作区当前不绿**：全量 `6 failed / 734 passed / 11 skipped`（失败**全部**在 Mock 三服务，逐条见 §4.6）。11 个 skip = 5 个需 MySQL + 6 个需 Redis —— **本机 AIDS 中间件容器当前未启动**（`docker ps` 只有一个无关的 `campus-mysql`）；要跑带库/带 Redis 的用例先执行 `cd deploy && docker compose --profile minimal up -d`（或 `--profile search` / `all`） |
 | 门禁 | 文档一致性 35 项 PASS；`ruff`（含 `scripts/`）+ `pyright` 0 errors；3 个生成器 `--check` 全绿 |
 | 镜像 | **三个服务镜像已端到端验证**：build 成功 + 容器起得来 + `/health` 返回 `code=0`（见 §4.1） |
-| 仓库规模 | ≈110 个受跟踪文件（含本次新增）；服务包 3 个（backend / ai / mock 骨架齐备） |
-| 远端 | `main` 与 `origin/main` 一致（`df60f82`），无未推送 |
+| 仓库规模 | ≈110 个受跟踪文件；服务包 3 个（backend / ai / mock） |
+| 远端 | `main` 与 `origin/main` 一致；**本地有未提交改动（§4.6 清单）** |
 
 **业务代码量：T1 的 BE 线已收官。** 鉴权（BE-03）/ 数据权限（BE-04）/ 通用组件（BE-05）/
-内部服务接口（BE-06）均已落地；MOCK / FE / AI 三线各剩脚手架与首批业务。
+内部服务接口（BE-06）均已落地；Mock 三服务的实现已写完（待修测试），FE / AI 两线未开工。
+
+> ⚠️ **两个报告文档已被删除**（工作区 `D` 状态，非本会话所为）：`docs/地基测评报告.md`、
+> `docs/AI自动生成可行性评估报告.md`。本文档 §0.1 与 §6 仍有指向后者的引用（**悬空引用待清理**）。
 
 ### 0.1 上一轮修复的三个前置条件（B1/B2/B3）
 
@@ -53,10 +56,12 @@
 # 纯标准库脚本（门禁）用系统 Python 即可
 C:/Users/heart/AppData/Local/Programs/Python/Python313/python.exe
 
-# 中间件：docker compose 已在跑（8 个容器 healthy）
-docker ps --format '{{.Names}}\t{{.Status}}'
-#   aids-mysql 13306 / aids-redis 6379 / aids-kafka 29092 / aids-minio 9000-9001
-#   aids-nginx 18080+443 / aids-milvus 19530+9091 / aids-milvus-minio 9100 / aids-milvus-etcd
+# 中间件：**当前未启动**（2026-09-24 实测 docker ps 只有一个无关容器）→ 需要时先起：
+cd deploy && docker compose --profile minimal up -d      # MySQL + Redis + Nginx
+# 全量档（含 Milvus，AI/RAG 用）：docker compose --profile search up -d
+# 端口：aids-mysql 13306 / aids-redis 6379 / aids-kafka 29092 / aids-minio 9000-9001
+#       aids-nginx 18080+443 / aids-milvus 19530+9091 / aids-milvus-minio 9100 / aids-milvus-etcd
+docker ps --format "{{.Names}}: {{.Status}}"
 ```
 
 若 venv 丢失需重建：
@@ -153,6 +158,16 @@ sed 's/`aids_shop`/`aids_shop_test`/g' docs/sql/schema.sql \
 > 反复拦截（§6）即源于 WSL git（未设 autocrlf）与 Windows git 混用 —— 新会话**禁止**再经 WSL
 > （`/mnt/f`、`wsl.exe`）执行任何仓库操作；脚本内确需调 bash 时用 `shutil.which("bash")` 的
 > 绝对路径（见 `tests/invariants/test_guard_selfcheck.py` 的处理）。
+
+### 3.0 cmd 会话的四个坑（2026-09-24 实测，会浪费大量时间）
+
+| 坑 | 现象 | 对策 |
+|---|---|---|
+| **Unix 工具不在 PATH** | `tail` / `grep` / `head` / `sed` 报 `invalid trailing option` 或直接失败；`git commit ... \| tail -2` 会把提交**打断在半途**（实测：钩子跑完但提交没落地） | 输出过滤用 `findstr`（原生）或 `.venv\Scripts\python.exe -c "..."` 里跑 `subprocess` 再筛；**提交时不要接管道** |
+| **多行 `python -c` 被截断** | `python -c "` 里带换行时，cmd 只执行第一行，**无任何报错、输出为空**（极难察觉） | 单行 `-c`（分号连接）或写临时脚本文件到 `C:\tmp\` 再跑 |
+| **推送必须带代理** | 裸 `git push` → `SSL_ERROR_SYSCALL`（直连被掐）；WSL 侧 `127.0.0.1:7890` 也到不了 Clash | 用：`git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push origin main`（一次成功；亦可 `git config` 写进本仓库配置） |
+| **`findstr` 语法** | `findstr /C:"a" /C:"b" \| head -5` 这类混用会报 `Cannot open \|` | 一条命令只用一种工具；需要复杂过滤就交给 python |
+
 
 ### 3.1 git
 
@@ -313,19 +328,59 @@ JWT 解出后传入，PRD §9.3「禁止从对话内容中提取」），不是�
 
 ---
 
-## 5. 下一步：T1 收官（剩余 6 项）+ 出口对账
+## 4.6 🚧 进行中（2026-09-24）：T1 剩余项 —— Mock 三服务已实现、测试待修
 
-| 任务 | 内容 | 依赖 |
-|------|------|------|
-| MOCK-01 | Mock 支付网关：统一下单 / 沙箱收银台 / 回调 / 查询 / 退款 / T+1 对账；`PaymentChannel` 抽象 | DEP-01 |
-| MOCK-02 | Mock 短信服务（发送 / 验证码回显 / 频控；`app/core/sms.py` 的接入点） | DEP-01 |
-| MOCK-03 | Mock 物流服务（运单 / 轨迹推进 / 查询） | DEP-01 |
-| FE-01 | 前端工程脚手架（Vite + Vue3 + TS + Pinia；商城 / 管理后台两个工程） | DEP-02 |
-| FE-02 | 请求封装（axios 拦截器、JWT 无感刷新并发队列）—— BE-03 已解锁 | FE-01, BE-03 |
-| AI-01 | AI 服务脚手架——骨架已在（BE-04 期间为镜像构建落地），剩**结构化日志**与配置隔离差量 | DEP-02 |
+> **新会话从这里开始接**。代码已写完并通过 lint/format，但 **Mock 测试 18/24 通过、6 个失败**；
+> 按铁律「未全绿不得勾选任务」，MOCK-01~03 仍是 ☐；工作区改动**一律未提交**。
 
-**出口对账（决策记录的触发点）**：以上 6 项完成后 T1 收官，按 `TASKS.md §工作量对账「决策记录」`
-对一次账：实测人天 vs 估算 21.5 人天 → ≤50% 维持全量 / 50~80% 砍第 1 档 / >80% 砍至第 3 档并重新裁决。
+**已落地文件**：
+
+| 文件 | 职责 |
+|---|---|
+| `aids-mock/aids_mock/models.py` | Mock 库 7 张表 ORM（独立 `MockBase`，对应 `docs/sql/mock_schema.sql`；`TINYINT/MEDIUMTEXT` 取自 `sqlalchemy.dialects.mysql`，数值默认走 `server_default=text(...)`） |
+| `aids-mock/aids_mock/db.py` | Mock 库会话工厂（`MOCK_DATABASE_URL`，惰性建 engine，语义同 `app/orm/session.py`） |
+| `aids-mock/aids_mock/constants.py` | 全部状态取值命名常量 + 故障注入 env 键名（C2 禁 status 配魔法数字） |
+| `aids-mock/aids_mock/rsa.py` | RSA2 签名/验签：`SHA256(body) + "\n" + ts + "\n" + nonce`；开发引导：密钥缺失现场生成落盘 |
+| `aids-mock/aids_mock/payment_channel.py` | `PaymentChannel` Protocol + `MockPaymentChannel`（下单/查询/关单/退款/对账 CSV）+ 回调登记与投递状态机（成功=商户回 `success`；失败退避；超限放弃）+ 故障注入（延迟/重复/丢失/渠道失败率） |
+| `aids-mock/aids_mock/routes_payment.py` | 渠道 HTTP 面：`/payment/uniorder`·`query`·`refund`、`/recon/daily`、`/callbacks/dispatch`、**沙箱收银台** `/cashier/{no}`（确认/取消/超时关单） |
+| `aids-mock/aids_mock/routes_sms.py` | `/sms/send`（60s 频控 → **10006/429**、开发环境验证码回显、落库）、`/sms/record/{mobile}` |
+| `aids-mock/aids_mock/routes_logistics.py` | `/logistics/waybill`、`/logistics/trace/{no}`（**按经过时间补齐轨迹节点**，`uk(delivery_no,trace_time)` 幂等） |
+| `aids-mock/aids_mock/api/__init__.py` | 聚合路由 + `MODULE_ROUTERS` |
+
+测试：`tests/api/test_mock_{payment,sms,logistics}.py`（均带 `task("MOCK-0x")` 标记）。替身用**按实体分发**的 `_SmartSession`（select 谁返回谁），比"结果队列"更能暴露查错表/漏条件。
+
+**6 个失败用例与根因（照单修即可）**：
+
+| 用例 | 现象 | 根因与修法 |
+|---|---|---|
+| `test_mock_payment.py::test_confirm_pays_and_schedules_callback` | 500 | 用例**没先播种订单**（替身会话为空）就 POST `/cashier/ORD100/confirm` → 修：先 `client.post("/payment/uniorder", json=_uniorder_body())` |
+| `test_mock_payment.py::test_cancel_closes_without_callback` | `IndexError: payment_rows[0]` | 同上：未建单 |
+| `test_mock_payment.py::test_cashier_page_renders_for_pending_order` | 500（`_Result` 无 `one_or_none`） | 路由 `_load_order` 用 `.one_or_none()`，payment 测试的 `_Result` 只实现了 `scalar_one_or_none` → 补 `one_or_none()`（另两个测试文件的替身已补） |
+| `test_mock_payment.py::test_dispatch_failure_schedules_backoff` | `assert 2 == 0` | **测试期望写错**：失败时实现置 `CALLBACK_FAILED(2)` + 退避（正确），用例却断言 `CALLBACK_WAITING` → 改断言 `CALLBACK_FAILED` + `retry_count==1` + `next_retry_time > now` |
+| `test_mock_logistics.py::test_create_waybill_rejects_duplicate_no` | `_waybill() got an unexpected keyword 'delivery_no'` | 测试辅助未支持覆盖参数 → 签名改 `_waybill(created_minutes_ago=0, **overrides)` |
+| `test_mock_logistics.py::test_trace_partial_advancement` | `assert 2 == 3` | **测试期望算错**：创建于 5 分钟前 → 已发生 0/2 分钟两个节点（10 分钟节点在将来）→ 断言改 `== 2` |
+
+> 另有一类"看着像 bug、实为替身局限"：`dispatch` 的 `next_retry_time` 过滤是 SQL WHERE，实体分发替身不模拟 WHERE（相关用例已改为断言投递报文与 `X-Channel-Sign` 头）。
+
+**仍需补的配套（不做会红）**：
+
+1. **新增 env 键尚未写入两个 `.env.example`**（`gen_data_dictionary.py::check_env_hygiene` 要求两侧同名）：
+   `MOCK_DATABASE_URL`、`MOCK_CHANNEL_RSA_PRIVATE_KEY_PATH`、`MOCK_CHANNEL_RSA_PUBLIC_KEY_PATH`、`MOCK_MERCHANT_RSA_PUBLIC_KEY_PATH`（后三者已在代码中 `os.getenv`）。
+2. **商户侧签名未实现**：`_require_merchant_signed` 目前**显式降级**（未配置商户公钥即跳过并告警，标 v0-draft）→ T3 做 BE-23 时补，并同步关掉降级。
+3. Mock 渠道报文是 **v0-draft**（TASKS 允许：先按「RSA2 + 统一响应体」出最小可用版，T3 只许向后兼容加字段）；若要进 `docs/API.md`，新增小节并标 v0-draft。
+
+**未开工**：`AI-01`（差量：结构化日志 + 配置隔离显式化）、`FE-01`（Vite+Vue3 双工程脚手架）、`FE-02`（axios 拦截器 + JWT 无感刷新并发队列，BE-03 已解锁）。
+
+---
+
+## 5. 下一步（精确顺序）
+
+1. **修 §4.6 的 6 个失败用例** → Mock 测试 24/24 + `scripts/task_runner.py verify` 8/8 全绿；
+2. 补 §4.6 的 4 个 env 键（两个 `.env.example`）→ 跑文档门禁确认 `check_env_hygiene` 过；
+3. 勾选 `TASKS.md` 的 **MOCK-01 / MOCK-02 / MOCK-03**（C10 会校验 `task` 标记，已具备）；
+4. 续做 **AI-01 差量** → **FE-01 / FE-02**；
+5. 全部完成后 **T1 出口对账**：按 `TASKS.md §工作量对账「决策记录」` 比对实测 vs 估算 21.5 人天（三档触发裁剪）；
+6. 提交（建议按任务分包；每次提交前 `task_runner verify` 全绿，且确认工作区没有意外删除 —— 当前有两个报告文档是 `D` 状态）。
 
 **收尾动作（每个任务都一样，C10 门禁会拦）**：把 `TASKS.md` 里该任务勾成 ✅ 之前，
 先给覆盖其验收标准的测试加 `pytestmark = [..., pytest.mark.task("<任务号>")]`。
@@ -348,8 +403,10 @@ JWT 解出后传入，PRD §9.3「禁止从对话内容中提取」），不是�
 | **Nginx TLS** | 同上（443 目前是空映射） |
 | **Alembic 纳管既有 DDL** | `DEP-04` 明确留待 T1；基建已就位，`aids-backend/alembic/versions/README.md` 写了正确的纳管步骤 |
 | **S5 迁移可回退检查** | `script.py.mako` 已把未实现的 downgrade 生成为 `raise`；完整 CI 检查按计划在 T6 |
-| **前端 / AI 服务** | `aids-ai`、`aids-mock` 目前只有 `requirements.txt`，未开工 |
-| `docs/项目设计报告.md §1` 的状态表 | 是**第二轮核查的历史快照**（里面的测试数、文件数已过时），按项目惯例保留不改 |
+| **前端 / AI 服务** | `aids-ai`：骨架已在（B2 期间为镜像构建落地），AI-01 差异只剩结构化日志与配置隔离；`aids-mock`：Mock-01~03 实现已落地（见 §4.6，测试待修）；**前端（FE-01/02）未开工** |
+| **两个报告文档已被删除**（工作区 `D`，2026-09-24） | `docs/地基测评报告.md`、`docs/AI自动生成可行性评估报告.md` 被移除，但 §0.1/§6 与部分提交说明仍引用后者 → **需清理悬空引用**（要么删引用，要么把两份报告恢复入库；`docs/VERSIONS.md` 未涉及这两份，无需改口径） |
+| **pre-commit ruff(0.8.4) 与 CI/本地 ruff(0.16.x) 的格式分歧** | 不止 lint 规则（`UP038`），**格式化风格也不同**：`tests/api/test_route_contract.py`、`tests/invariants/test_idor_guard.py` 出现了纯格式 churn（`assert re.search(...), "msg"` 的换行风格）。与上面「ruff 版本偏斜」同源，建议一次对齐 |
+
 
 ---
 
