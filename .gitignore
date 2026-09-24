@@ -68,6 +68,14 @@ Thumbs.db
 node_modules/
 web/**/dist/
 admin/**/dist/
+# 本仓库实际的前端工程目录是 aids-mall / aids-admin（与
+# deploy/app/frontend.Dockerfile 的 APP_DIR 参数一致）。上面 web/ 与 admin/ 是
+# 历史占位，保留以免误伤旧分支；新增前端工程时**两处都要补**。
+aids-mall/dist/
+aids-admin/dist/
+# Vite / Vitest 加载 TS 配置时会生成 `.timestamp-*.mjs` 临时文件
+# （正常退出自行删除，进程被强杀时残留）；它是纯中间产物，不入库。
+*.timestamp-*.mjs
 
 # ---- 临时/探针文件 ----
 # 与 scripts/hooks/forbid_temp_files.sh 互为双保险。

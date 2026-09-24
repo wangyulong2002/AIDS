@@ -47,9 +47,16 @@ uploads/
 .workbuddy/
 
 # ---- 前端构建产物 ----
+# 注意：只能排除 dist/ 与 node_modules/，**不能**排除 aids-mall/ 或 aids-admin/
+# 整体 —— deploy/app/frontend.Dockerfile 要 `COPY ${APP_DIR}/package.json` 与
+# `COPY ${APP_DIR}/ ./` 才能构建镜像（tests/contract/test_deploy_artifacts.py
+# 有反向断言守护这条）。
 node_modules/
 web/**/dist/
 admin/**/dist/
+aids-mall/dist/
+aids-admin/dist/
+*.timestamp-*.mjs
 
 # ---- 编辑器与 OS ----
 .idea/

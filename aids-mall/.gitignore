@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.vite/
+*.local
+# Vite / Vitest 加载 vite.config.ts / vitest.config.ts 时会生成
+# `.timestamp-*.mjs` 临时文件（正常退出会自行删除，被强杀时会残留）。
+*.timestamp-*.mjs
