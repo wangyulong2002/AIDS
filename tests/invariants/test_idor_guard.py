@@ -108,9 +108,9 @@ class TestNoUserIdFromRequest:
         covered = {p.resolve() for p in self._iter_py_files()}
         for pkg in scan_targets():
             if pkg.name.startswith("aids_"):
-                assert any(
-                    p.is_relative_to(pkg.resolve()) for p in covered
-                ), f"服务包 {pkg} 不在 IDOR 扫描面内 —— 服务层的越权代码将无人检查"
+                assert any(p.is_relative_to(pkg.resolve()) for p in covered), (
+                    f"服务包 {pkg} 不在 IDOR 扫描面内 —— 服务层的越权代码将无人检查"
+                )
 
     def test_no_user_id_parameter_extraction(self) -> None:
         """扫描 `request.args.get("user_id")` / `body.get("userId")` / `payload["user_id"]`。"""

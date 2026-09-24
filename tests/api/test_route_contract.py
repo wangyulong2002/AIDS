@@ -64,9 +64,9 @@ class TestModulePrefixes:
         """
         text = API_DOC.read_text(encoding="utf-8")
         pattern = rf"`{re.escape(prefix)}/"
-        assert re.search(
-            pattern, text
-        ), f"模块 {module} 的前缀 {prefix} 在 docs/API.md 中找不到任何真实路径"
+        assert re.search(pattern, text), (
+            f"模块 {module} 的前缀 {prefix} 在 docs/API.md 中找不到任何真实路径"
+        )
 
 
 # =====================================================================
@@ -103,9 +103,9 @@ class TestHealthEndpointContract:
 
     def test_dockerfile_exposes_documented_port(self) -> None:
         dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
-        assert re.search(
-            r"EXPOSE\s+8080\b", dockerfile
-        ), "主业务服务端口应为 8080（TASKS 服务清单）；改端口须同步 compose/Nginx/前端"
+        assert re.search(r"EXPOSE\s+8080\b", dockerfile), (
+            "主业务服务端口应为 8080（TASKS 服务清单）；改端口须同步 compose/Nginx/前端"
+        )
 
 
 # =====================================================================
