@@ -5,8 +5,9 @@ gunicorn 的目标模块路径是 ``aids_ai.main:app``
 
 启动顺序不可调换：
 
-    1. ``run_startup_assertions()`` —— 配置硬校验，不通过即 SystemExit
-    2. ``create_app()``             —— 装配 FastAPI
+    1. ``configure_structured_logging()`` —— 先装 JSON 日志，后面每步都可被采集
+    2. ``run_ai_startup_assertions()``    —— 配置硬校验，不通过即 SystemExit
+    3. ``create_app()``                   —— 装配 FastAPI
 
 为什么断言必须早于 app 构造：
     本服务是 ``ARK_API_KEY`` 的唯一消费者，S1-c 在生产环境缺 Key 时拒绝启动——
@@ -14,7 +15,11 @@ gunicorn 的目标模块路径是 ``aids_ai.main:app``
     ``StartupAssertionError`` 故意继承 ``SystemExit``，业务层的
     ``except Exception`` 吞不掉它。
 
-本模块有导入副作用（会校验环境变量），测试请改用
+为什么用 ``run_ai_startup_assertions()`` 而不是 ``run_startup_assertions()``：
+    AI 服务不连主业务库、不签 JWT、不做字段加密；用全量断言会把它与主业务的
+    配置绑死（AI-01 的「配置隔离」）。断言面收窄后，AI 的启动条件 == 它真实依赖。
+
+本模块有导入副作用（会装日志、校验环境变量），测试请改用
 ``aids_ai.app_factory.create_app``。
 """
 
@@ -22,13 +27,15 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from aids_ai.app_factory import create_app
-from app.core.config import run_startup_assertions
+from aids_ai.app_factory import SERVICE_NAME, create_app
+from app.core.config import run_ai_startup_assertions
+from app.core.logging import configure_structured_logging
 
 
 def bootstrap() -> FastAPI:
-    """先过启动断言，再装配应用。"""
-    run_startup_assertions()
+    """先装结构化日志、过启动断言，再装配应用。"""
+    configure_structured_logging(SERVICE_NAME)
+    run_ai_startup_assertions()
     return create_app()
 
 

@@ -123,21 +123,37 @@ def assert_secret_key_not_default(secret: str | None = None, env: str | None = N
         )
 
 
-def assert_required_keys_present(env: str | None = None) -> None:
+# 生产环境必需凭据 ——「配置隔离」的显式化起点：
+# 每个服务只声明自己真正需要的凭据，避免「AI 服务因为主业务的 Key 缺失而起不来」。
+_REQUIRED_KEYS_ALL: dict[str, str] = {
+    "ARK_API_KEY": "AI 客服 Ark 大模型 Key（PRD §9 / §10）",
+    "FIELD_ENCRYPT_KEY": "敏感字段 AES-256-GCM 加密密钥（schema.sql 头部约定 9）",
+    "FIELD_HMAC_KEY": "敏感字段 HMAC-SHA256 哈希密钥（schema.sql 头部约定 9）",
+}
+
+# AI 服务只需要 Ark Key（它不连主库、不签 JWT、不做字段加密）—— AI-01 配置隔离
+REQUIRED_KEYS_AI: dict[str, str] = {
+    "ARK_API_KEY": _REQUIRED_KEYS_ALL["ARK_API_KEY"],
+}
+
+
+def assert_required_keys_present(
+    env: str | None = None, required: dict[str, str] | None = None
+) -> None:
     """S1-c：生产环境必需的外部凭据必须存在。
 
     覆盖 PRD §10 第三方依赖：Ark API Key、加密密钥、渠道密钥。
+
+    `required` 用于**按服务收窄**校验面（配置隔离）：AI 服务传 `REQUIRED_KEYS_AI`
+    即可只校验 Ark Key，不会因为主业务的 `FIELD_*` 缺失而拒绝启动。
+    缺省 `None` = 全部凭据，保持既有行为逐字不变。
     """
     env = env or get_env()
     if env != PRODUCTION:
         return
 
-    required = {
-        "ARK_API_KEY": "AI 客服 Ark 大模型 Key（PRD §9 / §10）",
-        "FIELD_ENCRYPT_KEY": "敏感字段 AES-256-GCM 加密密钥（schema.sql 头部约定 9）",
-        "FIELD_HMAC_KEY": "敏感字段 HMAC-SHA256 哈希密钥（schema.sql 头部约定 9）",
-    }
-    missing = [f"{k}（{v}）" for k, v in required.items() if not os.getenv(k)]
+    keys = _REQUIRED_KEYS_ALL if required is None else required
+    missing = [f"{k}（{v}）" for k, v in keys.items() if not os.getenv(k)]
     if missing:
         raise StartupAssertionError("生产环境缺少必需的环境变量：\n  - " + "\n  - ".join(missing))
 
@@ -253,6 +269,56 @@ def get_internal_sign_secret() -> str:
 
 
 # =====================================================================
+# 日志与 AI 服务（Ark）配置（AI-01）
+#
+# 配置隔离的硬约束（由 tests/contract/test_service_config_isolation.py 强制）：
+#   服务包（如 `aids-ai/aids_ai/**`）**不得**直接读写 `os.environ` ——
+#   所有配置一律经本模块的访问器读取。这样「哪个服务读了哪些键」是可审计的，
+#   而不是散落在一堆 `os.getenv("...")` 里（那正是 f309978 那类半途改名的温床）。
+# =====================================================================
+
+DEFAULT_ARK_BASE_URL: str = "https://ark.cn-beijing.volces.com/api/v3"
+DEFAULT_ARK_MODEL: str = "ark-code-latest"
+DEFAULT_ARK_EMBEDDING_MODEL: str = "doubao-embedding"
+DEFAULT_ARK_EMBEDDING_DIM: int = 2048
+DEFAULT_ARK_DAILY_BUDGET_TOKENS: int = 2_000_000
+DEFAULT_LOG_LEVEL: str = "INFO"
+
+
+def get_log_level() -> str:
+    return os.getenv("LOG_LEVEL", "").strip().upper() or DEFAULT_LOG_LEVEL
+
+
+def get_ark_api_key() -> str:
+    """Ark API Key。
+
+    **只从环境变量读取** —— 不允许来自配置文件 / 代码常量 / 数据库：
+    一旦写进仓库就撤不回来（会进 git 历史）。空串 = 未配置（由 S1-c 兜底）。
+    """
+    return os.getenv("ARK_API_KEY", "").strip()
+
+
+def get_ark_base_url() -> str:
+    return os.getenv("ARK_BASE_URL", "").strip() or DEFAULT_ARK_BASE_URL
+
+
+def get_ark_model() -> str:
+    return os.getenv("ARK_MODEL", "").strip() or DEFAULT_ARK_MODEL
+
+
+def get_ark_embedding_model() -> str:
+    return os.getenv("ARK_EMBEDDING_MODEL", "").strip() or DEFAULT_ARK_EMBEDDING_MODEL
+
+
+def get_ark_embedding_dim() -> int:
+    return _int_env("ARK_EMBEDDING_DIM", DEFAULT_ARK_EMBEDDING_DIM)
+
+
+def get_ark_daily_budget_tokens() -> int:
+    return _int_env("ARK_DAILY_BUDGET_TOKENS", DEFAULT_ARK_DAILY_BUDGET_TOKENS)
+
+
+# =====================================================================
 # 统一入口
 # =====================================================================
 
@@ -269,6 +335,20 @@ def run_startup_assertions() -> None:
     assert_required_keys_present(env=env)
     assert_jwt_keys_configured(env=env)
     print(f"[启动断言] 通过 (APP_ENV={env})", file=sys.stderr)
+
+
+def run_ai_startup_assertions() -> None:
+    """AI 服务（aids-ai）的启动断言 —— 只校验 AI 自己真正需要的配置（AI-01）。
+
+    为什么与 `run_startup_assertions()` 分开（配置隔离的落地）：
+        AI 服务不连主业务库、不签 JWT、不做敏感字段加密，却因为复用同一个入口
+        被迫要求 `DATABASE_URL` / `SECRET_KEY` / `FIELD_*_KEY` —— 于是
+        「AI 能不能起」取决于与它无关的配置：隔离在文档里成立，在启动路径上不成立。
+        收窄成 Ark Key 之后，「AI 缺什么起不来」与「AI 需要什么」是同一件事。
+    """
+    env = get_env()
+    assert_required_keys_present(env=env, required=REQUIRED_KEYS_AI)
+    print(f"[AI 启动断言] 通过 (APP_ENV={env})", file=sys.stderr)
 
 
 if __name__ == "__main__":  # pragma: no cover
