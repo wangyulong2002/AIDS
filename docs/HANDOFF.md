@@ -3,7 +3,7 @@
 > **这份文档与工具无关。** 面向任何接手本仓库的开发者或 AI 会话。
 > 上一个会话用的是 WorkBuddy，其工作日志留在 `.workbuddy/memory/`（内容已提炼到本文件，可仅作参考）。
 >
-> 最后更新：2026-09-24（**T1 已收官：13/13 ✅，`task_runner verify` 8/8 PASS，出口对账完成**）· 各轮提交见 `git log`，现状只看 §0
+> 最后更新：2026-09-24（**T1 已收官：14/14 ✅，`task_runner verify` 10/10 PASS；全文已移除工期/工作量内容**）· 各轮提交见 `git log`，现状只看 §0
 
 ---
 
@@ -11,16 +11,16 @@
 
 | 项 | 值 |
 |---|---|
-| 阶段 | **T1 完成（13/13）→ 可进 T2** |
-| 已勾选任务 | DOC-01~03、DEP-01~04、**BE-00~BE-06**、**MOCK-01~03**、**AI-01**、**FE-01~02** |
-| **下一个任务** | **T2 起**。先读 `docs/TASKS.md §工作量对账「T1 出口对账（2026-09-24 实测）」`（已判定"压缩 ≥ 2 倍 → 维持全量、不进裁剪"），再从 `BE-07`（注册/登录）或 `AI-02`（Ark 客户端）挑一条；**开工前先跑 `scripts/task_runner.py card <编号>`** |
+| 阶段 | **T1 完成（14/14）→ 可进 T2** |
+| 已勾选任务 | DOC-01~03、DEP-01~04、**BE-00~BE-06**、**MOCK-01~03**、**AI-01**、**FE-01~02**、**BE-37**（行尾口径统一） |
+| **下一个任务** | **T2 起**：从 `BE-07`（注册 / 登录）或 `AI-02`（Ark 客户端）挑一条；**开工前先跑 `scripts/task_runner.py card <编号>`**。范围与协作口径见 `docs/TASKS.md §范围与协作口径` |
 | 测试基线 | **全绿**：全量 `830 passed / 11 skipped`（2026-09-24 实测）。11 个 skip = 5 个需 MySQL + 6 个需 Redis —— **本机 AIDS 中间件容器未启动**（`docker ps` 只有一个无关的 `campus-mysql`），这是**预期态、不是失败**；要跑带库/带 Redis 的用例先执行 `cd deploy && docker compose --profile minimal up -d`（或 `--profile search` / `all`） |
-| 门禁 | `scripts/task_runner.py verify` **10/10 PASS**（四项 `--check` + `ruff format/check` + C2/C4 扫描器 + `pyright` 0 errors + 全量测试）；文档一致性 **35 项 PASS** |
+| 门禁 | `scripts/task_runner.py verify` **10/10 PASS**（四项 `--check` + `ruff format/check` + C2/C4 扫描器 + `pyright` 0 errors + 全量测试）；文档一致性 **34 项 PASS** |
 | 镜像 | 三个**服务**镜像已端到端验证：build 成功 + 容器起得来 + `/health` 返回 `code=0`（见 §4.1）。**前端镜像未端到端构建**：两个前端工程 `npm run build` 已通过，但 `deploy/app/frontend.Dockerfile` 的 `docker build` 在本机没跑过（见 §4.7 遗留） |
-| 仓库规模 | **141** 个受跟踪文件（另 64 个待入库）≈ **205**；服务包 3 个（backend / ai / mock）+ 前端工程 2 个（aids-mall / aids-admin） |
-| 远端 | `main` 比 `origin/main` **ahead 1**（`72aa599` 未推送，推送见 §3.0）；**本地另有未提交改动（§4.7）** |
+| 仓库规模 | **205** 个受跟踪文件（T1 全部改动已提交，工作区干净）；服务包 3 个（backend / ai / mock）+ 前端工程 2 个（aids-mall / aids-admin） |
+| 远端 | `main` 比 `origin/main` **ahead 9**（未推送，推送见 §3.0） |
 
-**业务代码量：T1 全线收官（13/13）。** 鉴权（BE-03）/ 数据权限（BE-04）/ 通用组件（BE-05）/
+**业务代码量：T1 全线收官（14/14）。** 鉴权（BE-03）/ 数据权限（BE-04）/ 通用组件（BE-05）/
 内部服务接口（BE-06）均已落地；Mock 三服务（MOCK-01~03）实现与测试全绿；AI 服务脚手架（AI-01，
 结构化日志 + 配置隔离显式化）与两个独立前端工程 + axios 请求封装（FE-01/02）已完成。完整收官记录见 §4.7。
 
@@ -31,7 +31,7 @@
 ### 0.1 上一轮修复的三个前置条件（B1/B2/B3）
 
 > 背景：上一轮的可行性评估报告（**该文档已被项目所有者有意删除**，见 §0）判定本项目适合
-> 「门禁闭环下的逐任务生成」，但列出 5 个前置条件。B1/B2/B3 已落地，B4（Ark Key）按用户决定暂缓，B5（范围裁决）**已于 T1 出口完成对账**（见 `TASKS.md §工作量对账`）。
+> 「门禁闭环下的逐任务生成」，但列出 5 个前置条件。B1/B2/B3 已落地，B4（Ark Key）按用户决定暂缓，B5（范围裁决）**已裁决**：1 人 + AI 协作、范围暂不裁剪（见 `TASKS.md §范围与协作口径`）。
 
 | 编号 | 问题 | 落地方式 |
 |---|---|---|
@@ -82,7 +82,7 @@ C:/Users/heart/.workbuddy/binaries/python/versions/3.11.9/python.exe -m venv .ve
 <python> scripts/dev_env_check.py
 
 # 四项一致性门禁（对应 CI 的第一步）
-<python> docs/tools/gen_data_dictionary.py --check      # 文档 ↔ DDL/枚举/常量，35 项
+<python> docs/tools/gen_data_dictionary.py --check      # 文档 ↔ DDL/枚举/常量，34 项
 python3 scripts/gen_requirements.py --check             # aids-*/requirements.txt ← pyproject.toml
 python3 scripts/gen_constraints.py --check              # constraints.txt 覆盖全部直接依赖
 python3 scripts/gen_orm_models.py --check               # app/models/ ← docs/sql/schema.sql
@@ -134,7 +134,7 @@ sed 's/`aids_shop`/`aids_shop_test`/g' docs/sql/schema.sql \
 | `pyproject.toml` | `aids-*/requirements.txt` | `gen_requirements.py` | pre-commit + CI |
 | 当前环境 | `constraints.txt` | `gen_constraints.py` | pre-commit + CI |
 | `docs/sql/schema.sql` | `app/models/*.py` | `gen_orm_models.py` | pre-commit + CI |
-| `docs/*.md` + `schema.sql` | 35 项一致性断言 | `gen_data_dictionary.py` | pre-commit + CI |
+| `docs/*.md` + `schema.sql` | 34 项一致性断言 | `gen_data_dictionary.py` | pre-commit + CI |
 
 **派生文件一律不手改** —— 改了会被 `--check` 拦下。
 
@@ -401,7 +401,7 @@ JWT 解出后传入，PRD §9.3「禁止从对话内容中提取」），不是�
 |---|---|
 | `scripts/task_runner.py verify` | **10/10 PASS** |
 | 全量测试（无 DB） | `830 passed / 11 skipped` |
-| 文档一致性门禁 | `PASS 35 项` |
+| 文档一致性门禁 | `PASS 34 项` |
 | 三个生成器 `--check` | 全绿（清单 / 快照 / ORM） |
 | `ruff format --check` + `ruff check`（`app tests aids-* scripts`） | 全绿 |
 | `pyright`（basic） | `0 errors, 0 warnings` |
@@ -463,6 +463,17 @@ FE-02 的关键不变量（`src/api/`）：
 | `tokenStore.ts` | Token 读写的**唯一入口**（键名集中；无 `window` 时降级内存态） |
 | `notify.ts` | 统一错误提示（无 DOM 时降级 `console` —— 提示失败绝不反过来打断请求链） |
 
+### ⑤ BE-37：行尾口径统一（根治"提交反复被拦"）
+
+`core.autocrlf=true` 让文件以 CRLF 检出，而编辑器 / AI 写入 LF → 同一文件同时含 CRLF 与 LF。
+链式后果：`mixed-line-ending` 每次"修正" → diff 变成「所有行都改了」→ `git add` 时 autocrlf 又把
+CRLF 压成 LF，与库内 blob 不一致（"改一行" = "整文件重写"）→ **提交被反复拦下（实测连拦 3 轮，
+且 pre-commit 会报 Passed 却已改文件）**。
+
+修法：把口径写进仓库、与开发者本机配置解耦 —— 新增 `.gitattributes`（`* text=auto eol=lf` +
+`*.sh` 显式 `eol=lf` + 二进制声明），并做一次性 `git add --renormalize .`
+（实测对库内 blob 是 no-op：库内本就是 LF；真正的作用是让 git 自此刻起对工作区按同一口径归一）。
+
 ### 新增门禁
 
 1. **C13** `tests/contract/test_frontend_scaffold.py`（**34 条**，`task("FE-01")` / `task("FE-02")`）：
@@ -472,6 +483,10 @@ FE-02 的关键不变量（`src/api/`）：
    不装 Node 依赖，前端单测由下面的 frontend job 承担）。
 2. **CI `frontend` job**（矩阵 `aids-mall` / `aids-admin`：`npm ci` → lint → format:check → test → build），
    已并入 `gate` 汇总。理由与 `images` job 同：纯前端交付物 Python 侧三道门禁照不到，**并发语义更必须真跑**。
+3. **`tests/contract/test_line_endings.py`**（5 条，`task("BE-37")`）：`.gitattributes` 存在性、
+   对 `*` 生效的 `eol=lf` 规则（根治的唯一承重点）、`*.sh` 钉 LF、**无受跟踪文本文件混用行尾**、
+   `*.sh` 不含 CRLF。为什么必须常驻：口径文件有被删/改的可能，一旦消失顽疾会原样复发
+   而**没有任何测试会发现** —— 只会表现为"这次提交又卡住了"。
 
 ### 顺带修掉的两处门禁自身缺陷（都是"门禁会给人错误的安全感"）
 
@@ -486,10 +501,12 @@ FE-02 的关键不变量（`src/api/`）：
    重跑又变绿**（上一会话把它当成了"偶发噪音"，见 §6）。→ 已改为**每轮唯一 basetemp**
    （`_pytest_basetemp()`）：既不删除、也不复用。一个"跑第二次才绿"的门禁等于没有门禁。详见 §3.4。
 
-### T1 出口对账
+### T1 结论
 
-见 `docs/TASKS.md §工作量对账「T1 出口对账（2026-09-24 实测）」`。两口径（21.5 / 9.5 人天）
-实测压缩率均 ≥ 5 倍 → **判定"压缩 ≥ 2 倍"，维持全量范围、直接进 T2**，不触发任何裁剪。
+**范围维持全量、直接进入 T2**（不触发任何裁剪）。裁剪顺序与硬底线见 `docs/TASKS.md §范围与协作口径`。
+
+> 2026-09-24 起，PRD / TASKS / HANDOFF **不再记录任何工作量与工期数字** —— 这类数字既无法验收，
+> 又容易把讨论引到「估得准不准」而不是「东西对不对」。进度改以「梯次出口判据是否达成」为准。
 
 ### 遗留（都不影响 T1 出口判据）
 
@@ -498,7 +515,7 @@ FE-02 的关键不变量（`src/api/`）：
 | **前端镜像未端到端构建** | 两个工程 `npm run build` 已过，但 `deploy/app/frontend.Dockerfile` 的 `docker build` 本机没跑过；CI 的 `images` job 目前只覆盖 backend / ai / mock，**前端两个镜像待补入 CI 矩阵** |
 | 商户侧验签降级 | 见 §4.6 第 2 条（T3 的 BE-23 补） |
 | pre-commit ruff 版本偏斜 | **已修**（`ce2cf47`：rev 对齐 constraints 的 0.16.8） |
-| 行尾（CRLF/LF）归一化 | 部分文件的**已提交 blob 本身含混合行尾**，`mixed-line-ending` 会反复要求修正。建议按 §6 的方案做一次性 `.gitattributes` + renormalize；在此之前，若提交被该钩子反复拦下，**重复「`pre-commit run` → `git add` → `git commit`」两三轮即可稳定**（钩子改完工作区后必须重新 add） |
+| 行尾（CRLF/LF） | **已根治**（`c6333a8` / BE-37：`.gitattributes` 统一 `eol=lf` + renormalize + 常驻契约测试） |
 
 ---
 
@@ -513,7 +530,7 @@ FE-02 的关键不变量（`src/api/`）：
 4. 改完跑 `python scripts/task_runner.py verify`（当前 10/10），全绿再提交。
 5. `BE-07` 开工前先起中间件（注册 / 登录要用 Redis 存验证码与频控）：
    `cd deploy && docker compose --profile minimal up -d`。
-6. 提交时**按任务分包**（每包评审面建议 ≤ 30 文件，见 `TASKS.md` 出口对账的第 3 条边界）。
+6. 提交时**按任务分包**（每包评审面建议 ≤ 30 文件，见 `TASKS.md §范围与协作口径` 的「评审面约束」）。
 
 **收尾动作（每个任务都一样，C10 门禁会拦）**：把 `TASKS.md` 里该任务勾成 ✅ 之前，
 先给覆盖其验收标准的测试加 `pytestmark = [..., pytest.mark.task("<任务号>")]`。
@@ -527,9 +544,9 @@ FE-02 的关键不变量（`src/api/`）：
 | 项 | 状态 |
 |---|---|
 | **B4 · Ark API Key 与真实模型调用** | 按用户决定**暂缓**（本轮不动）。影响 AI-02 起的任务：本地用桩推进实现，`AI-01` 脚手架不依赖它 |
-| **pre-commit 的 ruff 版本与 CI 偏斜** | pre-commit 钉 `v0.8.4`，CI 经 constraints 装的是 0.16.x —— 同一份代码两边判定不同（实测 v0.8.4 报 `UP038`、0.16.x 不报；BE-04 提交时被 L1 拦下，见 `test_idor_guard.py:149` 的修改）。**处置（单独小任务，勿与功能提交混做）**：先在 `constraints.txt` 给 ruff 上锁，再把 `.pre-commit-config.yaml` 的 ruff `rev` 对齐到该版本，最后 `pre-commit run --all-files` 清一次全仓噪音 |
-| **双 git 环境的行尾翻转**（BE-05 提交期间确认） | Windows git `core.autocrlf=true`，WSL git 未设 —— 同一仓库两套提交环境对行尾各说各话：cmd git 的 pre-commit（patch 恢复）会把文件写成 CRLF，混合行尾随即被 `mixed-line-ending` 钩子拦下，提交反复中止。**处置建议**：加 `.gitattributes`（`* text=auto eol=lf`）统一口径 + 一次性 renormalize；在此之前，若提交被 `mixed-line-ending` 反复拦，对工作区跑一轮 `sed -i 's/\r$//'`（只处理受跟踪文本文件）再 add |
-| **B5 · 范围与工期裁决** | **已裁决（2026-09-23）**：采纳「1 人 + AI 作为第二执行者」，**范围暂不裁剪**，改由 T1 出口的实测压缩率触发分级裁剪。判据、裁剪顺序与硬底线见 `TASKS.md §工作量对账` 的「决策记录」。**已对账（2026-09-24）**：压缩率 ≥ 5 倍（两口径）→ 维持全量、直接进 T2，见 `TASKS.md §工作量对账「T1 出口对账」` |
+| **pre-commit 的 ruff 版本与 CI 偏斜** | **已修（2026-09-24，`ce2cf47`）**：`.pre-commit-config.yaml` 的 rev 由 `v0.8.4` 对齐到 `v0.16.8`（= `constraints.txt` 的锁）。根因是**中文字符宽度算法不同**导致长中文 `assert` 折行位置不一致，症状极隐蔽（pre-commit 报 Passed 却改了文件）。今后升级 ruff 必须**同时**改这两处 |
+| **行尾翻转（CRLF/LF）** | **已根治（2026-09-24，`c6333a8` / BE-37）**：新增 `.gitattributes`（`* text=auto eol=lf` + `*.sh` 显式 + 二进制声明）并做了一次性 renormalize —— 工作区与库内统一为 LF，与开发者本机 `core.autocrlf` 解耦。配套常驻门禁 `tests/contract/test_line_endings.py`（5 条）：口径文件存在性 + 规则正确性 + 无受跟踪文本文件混用行尾。此前「改一行 = 整文件重写」、提交连拦 3 轮的顽疾不再复发 |
+| **B5 · 范围裁决** | **已裁决（2026-09-23；2026-09-24 修订去工期）**：**1 人 + AI 协作**，**范围暂不裁剪**；裁剪顺序与硬底线见 `TASKS.md §范围与协作口径`。**原「按实测压缩率触发分级裁剪」的规则已删除** —— 进度不再以工期衡量，改以「梯次出口判据是否达成」为准 |
 | **Nginx `/api/` 前缀与后端路由不一致** | **已修复（2026-09-23，用户裁决取"nginx 剥离"方案）**：`location /api/` 加 `rewrite ^/api/(.*)$ /$1 break;`，后端路由保持无 `/api` 前缀；`/api/ai/**` 走更长前缀的独立 location，不受影响（AI 侧自带 `/api/ai` 前缀）。已实测：重建 `aids/nginx` 镜像并替换容器后，`GET /api/health` 经网关 → 后端日志为 `/health`（200），`/healthz` 200。教训已写进 `deploy/nginx/conf.d/default.conf` 的 location 注释；`API.md §1.1` 已注明剥离行为 |
 | **S1-c 与 S1-e 的口径** | `assert_required_keys_present`（Ark/字段加密密钥）与 `assert_jwt_keys_configured`（JWT 密钥文件）分列两条断言；若后续把密钥统一收敛到 KeyProvider，应合并并同步本表 |
 | **`.env.example` 与 compose 的中间件口令护栏** | 已登记为「未落地的约束」（`项目设计报告.md §9.10`），触发条件：首次部署到可被外网访问的环境前 |
@@ -538,7 +555,6 @@ FE-02 的关键不变量（`src/api/`）：
 | **S5 迁移可回退检查** | `script.py.mako` 已把未实现的 downgrade 生成为 `raise`；完整 CI 检查按计划在 T6 |
 | **前端 / AI 服务** | **三条线均已收官（见 §4.7）**：`aids-ai` 完成 AI-01（结构化日志 + 配置隔离显式化）；`aids-mock` 完成 MOCK-01~03（26/26 测试绿）；前端完成 FE-01/02（两个独立工程 + axios 请求封装）。**遗留**：① 前端两个镜像**未端到端构建**、也**未进 CI `images` 矩阵**（两个工程 `npm run build` 已通过，缺的是 `docker build`）；② 商户侧验签仍为显式降级（T3 的 BE-23 补）；③ Mock 渠道报文仍为 v0-draft |
 | **两个报告文档已删除** | `docs/地基测评报告.md`、`docs/AI自动生成可行性评估报告.md` **由项目所有者有意删除**（确认无用，不恢复），并已纳入 T1 收官提交。正文对它们的路径引用已清理（§0 / §0.1 / §6 改为叙述式；`docs/VERSIONS.md` 未涉及这两份，无需改口径） |
-| **pre-commit ruff(0.8.4) 与 CI/本地 ruff(0.16.x) 的格式分歧** | 不止 lint 规则（`UP038`），**格式化风格也不同**：`tests/api/test_route_contract.py`、`tests/invariants/test_idor_guard.py` 出现了纯格式 churn（`assert re.search(...), "msg"` 的换行风格）。与上面「ruff 版本偏斜」同源，建议一次对齐 |
 
 
 ---

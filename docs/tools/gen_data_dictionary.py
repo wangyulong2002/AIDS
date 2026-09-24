@@ -7,7 +7,7 @@
     python3 docs/tools/gen_data_dictionary.py --gen biz_order   # 从 DDL 重新生成该表的字典明细
 
 为什么存在：PRD/TASKS/API/DATA-DICTIONARY/schema 之间有一批「必须相等」的数字
-（表数、字段数、服务数、任务数、工期、枚举映射组…）。历史上它们靠人工核对，
+（表数、字段数、服务数、任务数、枚举映射组…）。历史上它们靠人工核对，
 v1.2/v1.3 两次跨文档修订都留下了未同步的残留。本脚本把这些约定变成退出码。
 
 --check 不修改任何文件；--gen 只往 stdout 打印，不写盘（避免静默改写文档）。
@@ -260,19 +260,9 @@ def check_cross_doc(r: Reporter) -> None:
     r.eq("TASKS 任务条目数", n_tasks, EXPECTED["tasks"])
     r.eq("README 踩坑条数", len(re.findall(r"^\*\*\d+\.", readme, re.M)), EXPECTED["pitfalls"])
     p = read(DOCS / "PRD.md")
-    # 只抓「把 16 周当作结论」的写法；`16 周 → 17 周`（沿革）与 `1 周 + 16 周 = 17 周`（算式）不算残留
-    bad16 = []
-    for src, txt in (("TASKS", tasks), ("PRD", p)):
-        for ln in txt.splitlines():
-            for m in re.finditer(r"16\s*周", ln):
-                if ln[m.end():m.end() + 3].lstrip().startswith("→"):
-                    continue
-                if "+" in ln[max(0, m.start() - 3):m.start()]:
-                    continue
-                bad16.append(f"{src}: {ln.strip()[:60]}")
-    r.eq("把 16 周当工期结论的残留", len(bad16), 0)
-    for b in bad16:
-        print("     ↳", b)
+    # 2026-09-24：移除「16 周残留」检查 —— 全文已不再有任何工期/工作量内容
+    # （不再有人天估算与周数排期），该检查的比对对象已不存在。若将来又引入排期，
+    # 这里需要连带恢复检查，而不是只把数字写回文档。
     ports = set(re.findall(r"EXPOSE (\d+)",
                            read(DEPLOY / "app" / "backend.Dockerfile")
                            + read(DEPLOY / "app" / "ai.Dockerfile")
@@ -456,7 +446,7 @@ def main() -> int:
         for f in r.failures:
             print("  - " + f)
         return 1
-    print(f"\033[32mPASS\033[0m  {r.passed} 项检查全部一致（表/字段/枚举/服务数/任务数/工期/内存口径/Java 残留）")
+    print(f"\033[32mPASS\033[0m  {r.passed} 项检查全部一致（表/字段/枚举/服务数/任务数/内存口径/Java 残留）")
     return 0
 
 
