@@ -139,7 +139,9 @@ def _headers(
 
 def test_order_detail_with_valid_signature() -> None:
     client = _client([_Result([_ORDER]), _Result([])])
-    response = client.get("/internal/order/SO20260919120001", headers=_headers())
+    response = client.get(
+        "/internal/order/SO20260919120001", params={"userId": 7001}, headers=_headers()
+    )
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["orderNo"] == "SO20260919120001"
@@ -150,11 +152,79 @@ def test_order_detail_with_valid_signature() -> None:
 def test_order_detail_masks_sensitive_fields() -> None:
     """脱敏是验收硬要求：电话密文与完整详细地址永不进入响应（会进 AI 提示词）。"""
     client = _client([_Result([_ORDER]), _Result([])])
-    response = client.get("/internal/order/SO20260919120001", headers=_headers())
+    response = client.get(
+        "/internal/order/SO20260919120001", params={"userId": 7001}, headers=_headers()
+    )
     text = response.text
     assert "AES-CIPHERTEXT-NEVER-LEAK" not in text, "电话密文不得出现在响应中"
     assert "广东省深圳市南山区科技园路1号" not in text, "详细地址必须脱敏"
     assert "****" in text and "广东省深圳" in text
+
+
+# =====================================================================
+# 一·B、行级权限：userId 必须参与查询条件（2026-09-24 加固）
+#
+# 背景：这三个"按业务号查"的接口原先是**不带 userId** 的，与 BE-04
+# 「资源访问一律 WHERE id=? AND user_id=?」相悖 —— orderNo 一旦泄漏即可跨用户读取。
+# 下面是把它们钉住的用例：既要求 userId 必填，也要求它真的进了 WHERE。
+# =====================================================================
+
+
+def test_order_detail_requires_user_id() -> None:
+    """漏传 userId → 10001（它在契约里是必填，不是可选）。
+
+    注意状态码：本项目的统一响应约定是**业务失败返回 HTTP 200**，用 body 里的
+    `code` 区分（仅 401/403/429/500 例外，见 app/core/handlers.py 的三条不变量）。
+    参数校验失败（10001）不在例外表里 —— 所以这里断言 200 + code，而不是 422。
+    """
+    client = _client([_Result([_ORDER]), _Result([])])
+    response = client.get("/internal/order/SO1", headers=_headers())
+    assert response.status_code == 200
+    assert response.json()["code"] == int(CommonError.PARAM_INVALID)
+
+
+def test_order_detail_hides_other_users_order() -> None:
+    """他人的订单 → 10004，且与"订单不存在"**不可区分**（不给探测反馈）。"""
+    client = _client([_Result([])])  # 归属查询查不到 → 不进入明细查询
+    response = client.get("/internal/order/SO1", params={"userId": 7002}, headers=_headers())
+    assert response.json()["code"] == int(CommonError.NOT_FOUND)
+
+
+def test_order_detail_where_clause_binds_user_id() -> None:
+    """静态断言：查询条件里必须同时出现 order_no 与 user_id。
+
+    为什么不仅靠上面的行为用例：行为用例用的是替身会话（不真跑 SQL），
+    把 WHERE 条件删掉它同样会绿 —— 那样门禁就成了装饰。这里直接编译
+    SQL 语句，确认 `user_id` 真的进了 WHERE。
+    """
+    from sqlalchemy import select
+
+    from app.models.biz import BizOrder
+
+    compiled = str(
+        select(BizOrder).where(BizOrder.order_no == "SO1", BizOrder.user_id == 7001).compile()
+    )
+    assert "user_id" in compiled and "order_no" in compiled
+
+
+def test_order_trace_checks_ownership_before_emptiness() -> None:
+    """轨迹接口先判归属：不是你的订单 → 10004，而不是"未发货"的空轨迹。"""
+    client = _client([_Result([])])  # 归属查询为空
+    response = client.get("/internal/order/SO1/trace", params={"userId": 7002}, headers=_headers())
+    assert response.json()["code"] == int(CommonError.NOT_FOUND)
+
+
+def test_refund_detail_requires_user_id() -> None:
+    client = _client([_Result([])])
+    response = client.get("/internal/refund/RF1", headers=_headers())
+    assert response.status_code == 200
+    assert response.json()["code"] == int(CommonError.PARAM_INVALID)
+
+
+def test_refund_detail_hides_other_users_refund() -> None:
+    client = _client([_Result([])])
+    response = client.get("/internal/refund/RF1", params={"userId": 7002}, headers=_headers())
+    assert response.json()["code"] == int(CommonError.NOT_FOUND)
 
 
 def test_order_list_contract() -> None:
@@ -189,8 +259,8 @@ def test_order_list_contract() -> None:
 
 def test_order_trace_empty_when_not_delivered() -> None:
     """未发货 → 空轨迹是**正常答案**（AI 要能回答"还没发货"），不是 404。"""
-    client = _client([_Result([])])  # 无配送单
-    response = client.get("/internal/order/SO1/trace", headers=_headers())
+    client = _client([_Result([1]), _Result([])])  # 归属命中 → 无配送单
+    response = client.get("/internal/order/SO1/trace", params={"userId": 7001}, headers=_headers())
     assert response.status_code == 200
     assert response.json()["data"] == {"deliveryNo": None, "company": None, "traces": []}
 

@@ -8,6 +8,14 @@
       （PRD §9.3 / API.md §四 安全要求：「userId 由 FastAPI 从用户 JWT 解析后
       传入，禁止从对话内容中提取」）。userId 在这里是**业务入参**而非凭据。
 
+**但"业务入参"不等于"可以不校验"**（2026-09-24 加固）：本文件**每个**接口都把
+userId 写进 WHERE 条件（`order_no = ? AND user_id = ?`），查不到一律 10004 且
+不区分"不存在"与"不是你的"。原先只有 `order_list` 这么做，
+`order/{orderNo}` / `{orderNo}/trace` / `refund/{refundNo}` 是只按业务号查的 ——
+那与 BE-04「资源访问一律 `WHERE id=? AND user_id=?`」的硬约束相悖：
+只要 orderNo 泄漏或被猜到，就能跨用户读取。AI-11 的验收
+（「仅限当前用户本人订单」）必须落在**服务端**，不能只靠调用方自觉。
+
 脱敏（验收硬要求）：
     本接口面向 AI 大模型的上下文组装，返回内容会进入提示词 ——
     `receiver_phone`（AES 密文）**永远不出现在响应里**；`receiver_addr` 只回
@@ -129,10 +137,29 @@ async def order_list(
 
 @router.get("/order/{orderNo}", summary="订单详情")
 async def order_detail(
-    orderNo: str, session: Annotated[AsyncSession, Depends(get_db)]
+    orderNo: str,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[int, Query(alias="userId", gt=0, description="AI 服务从其用户的 JWT 解出")],
 ) -> ApiResponse:
+    """订单详情（**必须带 userId**，越权查不到就是查不到）。
+
+    为什么这三个"按业务号查"的接口也要带 userId（2026-09-24 加固）：
+        `order_list` 一直是按 userId 过滤的，但 `{orderNo}` / `{orderNo}/trace` /
+        `refund/{refundNo}` 原先只按业务号查 —— 而 BE-04 的硬约束是
+        「资源访问一律 `WHERE id=? AND user_id=?`」。少了这一条，只要 orderNo
+        被猜到或从别处泄漏，就能跨用户读到他人订单（受服务间签名 + 内网限制兜底，
+        但那是"网络边界"而不是"数据权限"）。
+        AI-11 的验收写的是「仅限当前用户本人订单」，把这条约束放在**服务端**才算数。
+
+    语义与 BE-04 一致：**「不存在」与「不是你的」不可区分** —— 两者都返回**同一个**
+    业务码 10004（HTTP 状态按项目统一响应约定仍为 200），不给探测者任何反馈。
+    """
     order = (
-        (await session.execute(select(BizOrder).where(BizOrder.order_no == orderNo)))
+        (
+            await session.execute(
+                select(BizOrder).where(BizOrder.order_no == orderNo, BizOrder.user_id == user_id)
+            )
+        )
         .scalars()
         .one_or_none()
     )
@@ -158,9 +185,23 @@ async def order_detail(
 
 @router.get("/order/{orderNo}/trace", summary="物流轨迹")
 async def order_trace(
-    orderNo: str, session: Annotated[AsyncSession, Depends(get_db)]
+    orderNo: str,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[int, Query(alias="userId", gt=0)],
 ) -> ApiResponse:
-    """未发货返回空轨迹 —— 对 AI 场景"还没发货"是**正常答案**，不是 404 错误。"""
+    """未发货返回空轨迹 —— 对 AI 场景"还没发货"是**正常答案**，不是 404 错误。
+
+    但「订单不是这个用户的」是**另一个**答案，必须先判归属（返回 10004），
+    否则"未发货"会变成探测他人订单是否存在的旁路。
+    """
+    owned = (
+        await session.execute(
+            select(BizOrder.id).where(BizOrder.order_no == orderNo, BizOrder.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if owned is None:
+        raise BusinessError.not_found("订单不存在")
+
     delivery = (
         (await session.execute(select(BizDelivery).where(BizDelivery.order_no == orderNo)))
         .scalars()
@@ -198,10 +239,19 @@ async def order_trace(
 
 @router.get("/refund/{refundNo}", summary="售后进度")
 async def refund_detail(
-    refundNo: str, session: Annotated[AsyncSession, Depends(get_db)]
+    refundNo: str,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[int, Query(alias="userId", gt=0)],
 ) -> ApiResponse:
+    """售后进度（同样必须带 userId，见 `order_detail` 的说明）。"""
     refund = (
-        (await session.execute(select(BizRefund).where(BizRefund.refund_no == refundNo)))
+        (
+            await session.execute(
+                select(BizRefund).where(
+                    BizRefund.refund_no == refundNo, BizRefund.user_id == user_id
+                )
+            )
+        )
         .scalars()
         .one_or_none()
     )

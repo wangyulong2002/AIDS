@@ -604,16 +604,30 @@ Query: status（可多值，如 status=10,20）, pageNum, pageSize
 | 方法 | 路径 | 调用方 | 说明 |
 |------|------|--------|------|
 | GET | `/internal/order/list` | AI 服务 | 按用户查订单列表 |
-| GET | `/internal/order/{orderNo}` | AI 服务 | 订单详情 |
-| GET | `/internal/order/{orderNo}/trace` | AI 服务 | 物流轨迹 |
-| GET | `/internal/refund/{refundNo}` | AI 服务 | 售后进度 |
+| GET | `/internal/order/{orderNo}` | AI 服务 | 订单详情（**必须带 `userId`**） |
+| GET | `/internal/order/{orderNo}/trace` | AI 服务 | 物流轨迹（**必须带 `userId`**） |
+| GET | `/internal/refund/{refundNo}` | AI 服务 | 售后进度（**必须带 `userId`**） |
 | GET | `/internal/product/{spuId}` | AI 服务 | 商品详情（供知识库同步） |
 | POST | `/internal/kb/notify` | 主业务服务 | 知识库变更通知 **（同步直呼；异步广播走 Kafka `kb.index.rebuild`，见 §六）** |
+
+> **`userId` 是必填项，且是行级权限的一部分（2026-09-24 加固，原契约缺此项）**：
+> 上表**每一个**查询接口都要求 `userId`，服务端一律按 `业务号 AND user_id`
+> 查询，查不到返回 **10004 且不区分「不存在」与「不是你的」**（HTTP 状态按 §1.1
+> 统一响应约定为 200）—— 与 BE-04 的
+> 数据权限口径一致。此前只有 `/order/list` 带 `userId`，另三个只按业务号查，
+> 与「资源访问一律 `WHERE id=? AND user_id=?`」的硬约束相悖。
 
 **`GET /internal/order/list`**
 
 ```
 Query: userId（必填）, status, pageNum, pageSize
+Header: X-Internal-Token, X-Timestamp, X-Nonce, X-Sign
+```
+
+**`GET /internal/order/{orderNo}` / `/internal/order/{orderNo}/trace` / `/internal/refund/{refundNo}`**
+
+```
+Query: userId（必填）
 Header: X-Internal-Token, X-Timestamp, X-Nonce, X-Sign
 ```
 
