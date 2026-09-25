@@ -166,7 +166,9 @@ def check() -> int:
 
 def write() -> int:
     lines = freeze()
-    CONSTRAINTS.write_text(HEADER + "\n".join(lines) + "\n", encoding="utf-8")
+    # newline="\n" 必须保留：Windows 上 write_text 默认落 CRLF，与
+    # .gitattributes 的 eol=lf 冲突，每次生成都会让 mixed-line-ending 钩子变红。
+    CONSTRAINTS.write_text(HEADER + "\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     print(f"  ✓ 已写入 {CONSTRAINTS.relative_to(ROOT)}（{len(lines)} 个包）")
     return 0
 

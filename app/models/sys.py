@@ -61,6 +61,7 @@ class SysAuditLog(Base, PKMixin, CreateTimeMixin):
         Index("idx_operator_time", "operator_id", "create_time"),
         Index("idx_module_action", "module", "action"),
         Index("idx_trace_id", "trace_id"),
+        {"comment": '操作审计日志表'},
     )
 
 
@@ -72,12 +73,13 @@ class SysConfig(Base, PKMixin, TimestampMixin):
     config_key: Mapped[str] = mapped_column(VARCHAR(128), comment='配置键, 如 ai.retrieval_score_threshold')
     config_value: Mapped[str] = mapped_column(VARCHAR(512), comment='配置值(字符串, 按 value_type 解析)')
     value_type: Mapped[int] = mapped_column(TINYINT, server_default=text('0'), comment='值类型: 0 string 1 int 2 float 3 bool 4 json')
-    description: Mapped[str] = mapped_column(VARCHAR(255), server_default=text(''), comment='配置说明')
+    description: Mapped[str] = mapped_column(VARCHAR(255), server_default=text("''"), comment='配置说明')
     updated_by: Mapped[int] = mapped_column(BIGINT(unsigned=True), server_default=text('0'), comment='最后修改人 sys_user.id')
     create_time: Mapped[dt.datetime] = mapped_column(DATETIME, server_default=text("CURRENT_TIMESTAMP"))
 
     __table_args__ = (
         UniqueConstraint("config_key", name="uk_config_key"),
+        {"comment": '系统动态配置表'},
     )
 
 
@@ -99,6 +101,7 @@ class SysDeadLetter(Base, PKMixin, CreateTimeMixin):
     __table_args__ = (
         Index("idx_source_status", "source", "status"),
         Index("idx_ref_key", "ref_key"),
+        {"comment": '死信表'},
     )
 
 
@@ -120,6 +123,7 @@ class SysLocalMessage(Base, PKMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("biz_type", "biz_no", "topic", name="uk_biz_topic"),  # 同一业务事件的幂等键
         Index("idx_status_retry", "status", "next_retry_time"),  # 投递任务扫描
+        {"comment": '本地消息表'},
     )
 
 
@@ -140,6 +144,7 @@ class SysPermission(Base, PKMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("perm_code", name="uk_perm_code"),
         Index("idx_parent_id", "parent_id"),
+        {"comment": '权限表'},
     )
 
 
@@ -157,6 +162,7 @@ class SysRole(Base, PKMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("code", name="uk_code"),
+        {"comment": '角色表'},
     )
 
 
@@ -171,6 +177,7 @@ class SysRolePermission(Base, PKMixin):
     __table_args__ = (
         UniqueConstraint("role_id", "permission_id", name="uk_role_perm"),
         Index("idx_permission_id", "permission_id"),
+        {"comment": '角色权限关联表'},
     )
 
 
@@ -191,6 +198,7 @@ class SysUser(Base, PKMixin, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (
         UniqueConstraint("username", name="uk_username"),
         Index("idx_mobile_hash", "mobile_hash"),
+        {"comment": '后台用户表'},
     )
 
 
@@ -205,4 +213,5 @@ class SysUserRole(Base, PKMixin):
     __table_args__ = (
         UniqueConstraint("user_id", "role_id", name="uk_user_role"),
         Index("idx_role_id", "role_id"),
+        {"comment": '用户角色关联表'},
     )

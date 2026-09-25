@@ -55,6 +55,7 @@ class AiAgent(Base, PKMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("agent_no", name="uk_agent_no"),
         UniqueConstraint("user_id", name="uk_user_id"),
+        {"comment": '客服坐席表'},
     )
 
 
@@ -76,6 +77,7 @@ class AiConversation(Base, PKMixin, TimestampMixin):
         UniqueConstraint("conversation_no", name="uk_conversation_no"),
         Index("idx_user_id", "user_id", "status"),
         Index("idx_status_update", "status", "update_time"),  # 会话超时结束扫描
+        {"comment": 'AI会话表'},
     )
 
 
@@ -93,6 +95,7 @@ class AiFeedback(Base, PKMixin, CreateTimeMixin):
     __table_args__ = (
         UniqueConstraint("message_id", "user_id", name="uk_message_user"),  # 同一用户对同一消息仅一次评价
         Index("idx_conversation_id", "conversation_id"),
+        {"comment": 'AI会话评价表'},
     )
 
 
@@ -116,6 +119,7 @@ class AiHandoffRecord(Base, PKMixin, TimestampMixin):
         Index("idx_conversation_id", "conversation_id"),
         Index("idx_agent_status", "agent_id", "queue_status"),
         Index("idx_queue_status_time", "queue_status", "create_time"),  # 排队超时扫描
+        {"comment": '转人工记录表'},
     )
 
 
@@ -133,6 +137,7 @@ class AiKbChunk(Base, PKMixin, CreateTimeMixin):
     __table_args__ = (
         Index("idx_document_id", "document_id"),
         Index("idx_domain_status", "domain", "status"),
+        {"comment": 'AI知识库切片表'},
     )
 
 
@@ -143,7 +148,7 @@ class AiKbDocument(Base, PKMixin, TimestampMixin, OptimisticLockMixin):
 
     title: Mapped[str] = mapped_column(VARCHAR(128), comment='文档标题')
     domain: Mapped[str] = mapped_column(VARCHAR(16), comment='知识域: product/policy/faq')
-    file_type: Mapped[str] = mapped_column(VARCHAR(16), server_default=text('md'), comment='类型: pdf/docx/md/text')
+    file_type: Mapped[str] = mapped_column(VARCHAR(16), server_default=text("'md'"), comment='类型: pdf/docx/md/text')
     file_url: Mapped[str | None] = mapped_column(VARCHAR(255), nullable=True, server_default=text('NULL'), comment='原始文件URL(手工录入为NULL)')
     content: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, comment='纯文本内容')
     chunk_count: Mapped[int] = mapped_column(INTEGER, server_default=text('0'), comment='切片数量')
@@ -154,6 +159,7 @@ class AiKbDocument(Base, PKMixin, TimestampMixin, OptimisticLockMixin):
 
     __table_args__ = (
         Index("idx_domain_enabled", "domain", "enabled"),
+        {"comment": 'AI知识库文档表'},
     )
 
 
@@ -176,4 +182,5 @@ class AiMessage(Base, PKMixin, CreateTimeMixin):
 
     __table_args__ = (
         Index("idx_conversation_id", "conversation_id", "create_time"),
+        {"comment": 'AI消息表'},
     )

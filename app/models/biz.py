@@ -57,6 +57,7 @@ class BizAddress(Base, PKMixin, TimestampMixin, SoftDeleteMixin):
 
     __table_args__ = (
         Index("idx_user_id", "user_id"),
+        {"comment": '收货地址表'},
     )
 
 
@@ -74,6 +75,7 @@ class BizBrand(Base, PKMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("name", name="uk_name"),
+        {"comment": '品牌表'},
     )
 
 
@@ -90,6 +92,7 @@ class BizCart(Base, PKMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("user_id", "sku_id", name="uk_user_sku"),
+        {"comment": '购物车表'},
     )
 
 
@@ -108,6 +111,7 @@ class BizCategory(Base, PKMixin, TimestampMixin):
 
     __table_args__ = (
         Index("idx_parent_id", "parent_id"),
+        {"comment": '商品分类表'},
     )
 
 
@@ -135,6 +139,7 @@ class BizCouponTemplate(Base, PKMixin, TimestampMixin, SoftDeleteMixin):
 
     __table_args__ = (
         Index("idx_status_time", "status", "start_time", "end_time"),
+        {"comment": '优惠券模板表'},
     )
 
 
@@ -157,6 +162,7 @@ class BizDelivery(Base, PKMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("delivery_no", name="uk_delivery_no"),
         Index("idx_order_no", "order_no"),
+        {"comment": '运单表'},
     )
 
 
@@ -174,6 +180,7 @@ class BizDeliveryTrace(Base, PKMixin, CreateTimeMixin):
     __table_args__ = (
         UniqueConstraint("delivery_no", "trace_time", "status_desc", name="uk_delivery_time_desc"),  # 拉取幂等
         Index("idx_delivery_id", "delivery_id"),
+        {"comment": '物流轨迹表'},
     )
 
 
@@ -191,6 +198,10 @@ class BizFreightTemplate(Base, PKMixin, TimestampMixin):
     status: Mapped[int] = mapped_column(TINYINT, server_default=text('1'), comment='状态: 1启用 0禁用')
     create_time: Mapped[dt.datetime] = mapped_column(DATETIME, server_default=text("CURRENT_TIMESTAMP"))
 
+    __table_args__ = (
+        {"comment": '运费模板表'},
+    )
+
 
 class BizMessage(Base, PKMixin, CreateTimeMixin):
     """站内信表（`biz_message`）。"""
@@ -207,6 +218,7 @@ class BizMessage(Base, PKMixin, CreateTimeMixin):
 
     __table_args__ = (
         Index("idx_user_read_time", "user_id", "is_read", "create_time"),  # 未读列表 + 倒序
+        {"comment": '站内信表'},
     )
 
 
@@ -242,6 +254,7 @@ class BizOrder(Base, PKMixin, TimestampMixin, OptimisticLockMixin):
         Index("idx_user_status", "user_id", "status"),
         Index("idx_status_create", "status", "create_time"),  # 超时关单/自动收货兜底扫描(PRD §6.7)
         Index("idx_create_time", "create_time"),
+        {"comment": '订单主表'},
     )
 
 
@@ -271,6 +284,7 @@ class BizOrderItem(Base, PKMixin, CreateTimeMixin):
         Index("idx_order_no", "order_no"),
         Index("idx_user_id", "user_id"),
         Index("idx_spu_id", "spu_id"),
+        {"comment": '订单明细表'},
     )
 
 
@@ -290,6 +304,7 @@ class BizOrderLog(Base, PKMixin, CreateTimeMixin):
 
     __table_args__ = (
         Index("idx_order_id", "order_id", "create_time"),
+        {"comment": '订单状态流转日志表'},
     )
 
 
@@ -315,6 +330,7 @@ class BizPayment(Base, PKMixin, TimestampMixin):
         UniqueConstraint("channel_trade_no", name="uk_channel_trade_no"),  # 渠道回调幂等(MySQL 允许多个 NULL)
         Index("idx_order_no", "order_no"),
         Index("idx_status_update", "status", "update_time"),  # 主动查询补偿扫描
+        {"comment": '支付流水表'},
     )
 
 
@@ -341,6 +357,7 @@ class BizProductReview(Base, PKMixin, TimestampMixin):
         UniqueConstraint("order_item_id", name="uk_order_item_id"),  # 一个订单项一条评价
         Index("idx_spu_id_score", "spu_id", "score"),
         Index("idx_spu_time", "spu_id", "create_time"),  # 商品评价列表按时间倒序
+        {"comment": '商品评价表'},
     )
 
 
@@ -373,6 +390,7 @@ class BizRefund(Base, PKMixin, TimestampMixin):
         Index("idx_user_id", "user_id"),
         Index("idx_order_item_id", "order_item_id"),
         Index("idx_status", "status"),
+        {"comment": '售后单表'},
     )
 
 
@@ -393,6 +411,7 @@ class BizSku(Base, PKMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("sku_code", name="uk_sku_code"),
         Index("idx_spu_id", "spu_id"),
+        {"comment": 'SKU表'},
     )
 
 
@@ -410,6 +429,7 @@ class BizSkuStock(Base, PKMixin, TimestampMixin, OptimisticLockMixin):
 
     __table_args__ = (
         UniqueConstraint("sku_id", name="uk_sku_id"),
+        {"comment": 'SKU库存表'},
     )
 
 
@@ -437,6 +457,7 @@ class BizSpu(Base, PKMixin, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (
         Index("idx_category_status", "category_id", "status"),
         Index("idx_brand_id", "brand_id"),
+        {"comment": 'SPU商品表'},
     )
 
 
@@ -451,6 +472,7 @@ class BizSpuImage(Base, PKMixin, CreateTimeMixin):
 
     __table_args__ = (
         Index("idx_spu_id", "spu_id"),
+        {"comment": 'SPU图集表'},
     )
 
 
@@ -475,6 +497,7 @@ class BizStockLog(Base, PKMixin, CreateTimeMixin):
         Index("idx_sku_id", "sku_id"),
         Index("idx_order_no", "order_no"),
         Index("idx_refund_no", "refund_no"),
+        {"comment": '库存变更流水表'},
     )
 
 
@@ -496,6 +519,7 @@ class BizUser(Base, PKMixin, TimestampMixin, SoftDeleteMixin):
 
     __table_args__ = (
         UniqueConstraint("mobile_hash", name="uk_mobile_hash"),
+        {"comment": '用户表'},
     )
 
 
@@ -517,4 +541,5 @@ class BizUserCoupon(Base, PKMixin, TimestampMixin):
         Index("idx_user_status", "user_id", "status"),
         Index("idx_coupon_id", "coupon_id"),
         Index("idx_status_expire", "status", "expire_time"),  # 过期扫描
+        {"comment": '用户优惠券表'},
     )

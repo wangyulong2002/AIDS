@@ -44,16 +44,27 @@ def utcnow() -> dt.datetime:
 class PKMixin:
     """雪花 ID 主键（38/38 表）。
 
-    DDL：`id BIGINT UNSIGNED NOT NULL COMMENT '雪花ID'`。
+    DDL：`id BIGINT UNSIGNED NOT NULL`（注释见下），**没有 AUTO_INCREMENT**。
     值由**应用层**生成（DDL 约定 2），故用 Python 侧 `default=next_id`
     而不是 `server_default` —— 数据库并不知道本项目雪花 ID 的纪元与 workerId。
+
+    `autoincrement=False` 是**必须显式写**的（2026-09-24 由 Alembic 初始迁移实测暴露）：
+    SQLAlchemy 对"单列整数主键"的默认行为是 `autoincrement="auto"` → 渲染成
+    `AUTO_INCREMENT`，与 DDL 不符。它只在**从模型生成 DDL** 时暴露（日常查询无感），
+    而本项目建表一直走 `docs/sql`，所以这个偏差长期无人发现 —— 直到第一次用迁移建库。
+
+    为什么这里**不写** `comment="雪花ID"`：DDL 侧并不统一 —— 38 张表里只有 3 张给
+    `id` 加了注释（`ai_agent` / `ai_conversation` 为「雪花ID」、`ai_kb_chunk` 为
+    「同时作为 Milvus 向量记录主键」），其余 35 张没有。Mixin 是**统一**的，
+    写死注释会让 35 张表多出不存在的 COMMENT。故取"多数派口径"（不写），
+    那 3 张表的 `id` 注释作为**已知残差**记录在初始迁移的 docstring 里。
     """
 
     id: Mapped[int] = mapped_column(
         BIGINT(unsigned=True),
         primary_key=True,
+        autoincrement=False,
         default=next_id,
-        comment="雪花ID",
     )
 
 
@@ -79,7 +90,13 @@ class TimestampMixin(CreateTimeMixin):
 
     `onupdate=utcnow` 就是 TASKS BE-02 要求的那套"自动填充"：任何经 ORM 的
     UPDATE 都会带上新时间，业务代码不必手写（手写必然有人忘）。
-    DDL 侧的 `ON UPDATE CURRENT_TIMESTAMP` 是给裸 SQL 更新兜底的。
+    DDL 侧的 `ON UPDATE CURRENT_TIMESTAMP` 是给裸 SQL 更新兜底的 ——
+    它必须写在 `server_default` 的**文本里**（2026-09-24 修正）：
+    SQLAlchemy 的 `server_onupdate` **不会**被渲染进 MySQL 的 DDL，
+    原先写的 `server_default=func.current_timestamp()` 只生成了
+    `DEFAULT CURRENT_TIMESTAMP`，**掉了 `ON UPDATE`** —— 于是"用迁移建的库"
+    与 schema.sql 建出的库在这一列上行为不同（裸 SQL UPDATE 时时间不自动刷新）。
+    与 `autoincrement` 那条一样，这个偏差只在生成 DDL 时才暴露。
     """
 
     update_time: Mapped[dt.datetime] = mapped_column(
@@ -87,7 +104,7 @@ class TimestampMixin(CreateTimeMixin):
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default=func.current_timestamp(),
+        server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
     )
 
 

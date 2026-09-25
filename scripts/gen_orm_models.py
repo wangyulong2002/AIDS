@@ -292,9 +292,23 @@ def _render_column(c: Column) -> str:
     if c.default is not None:
         raw = c.default
         if raw.startswith("'") and raw.endswith("'") and len(raw) >= 2:
-            # 去掉 SQL 的单引号后用 repr 重新转义 —— DDL 注释/默认值里出现
-            # 双引号是常态（COMMENT '轨迹描述(如"已签收")'），直接拼字面量会出语法错误。
-            args.append(f"server_default=text({raw[1:-1]!r})")
+            # text() 接收的是**原始 SQL**，不是 Python 值 —— 单引号必须留在字符串里。
+            #
+            # 历史缺陷（2026-09-24 由 Alembic 初始迁移实测暴露）：
+            # 此处原本写作 `text({raw[1:-1]!r})`，把 DDL 的 `DEFAULT 'md'` 渲染成
+            # `text('md')` → 生成 SQL `DEFAULT md`（**掉了单引号**）。受影响的列：
+            # `ai_kb_document.file_type`（DEFAULT 'md'）与 `sys_config.description`（DEFAULT ''），
+            # 后者更糟 —— 直接生成 `DEFAULT ` 悬空。
+            # 报错形态：`pymysql.err.ProgrammingError (1064) ... near 'md, ...'`。
+            #
+            # 为什么长期潜伏：ORM 模型只用于查询（建表一律由 docs/sql 提供），
+            # 而 autogenerate 又刻意关掉了 server_default 比对（见 alembic/env.py），
+            # 于是这条错误直到「用迁移从零建库」时才第一次被触发。
+            #
+            # 修法：把**整个 SQL 字面量（含单引号）**交给 repr 转义 ——
+            # `'md'` → `text("'md'")`、`''` → `text("''")`，双引号仍由 repr 负责。
+            literal = f"'{raw[1:-1]}'"
+            args.append(f"server_default=text({literal!r})")
         elif raw.upper() == "CURRENT_TIMESTAMP":
             args.append('server_default=text("CURRENT_TIMESTAMP")')
         else:
@@ -329,11 +343,21 @@ def _render_table(t: Table) -> str:
             # 写成 Index(cols..., name=...) 会在导入时直接 TypeError。
             constraints.append(f'        Index("{name}", {cols_repr}),{note}')
 
+    # 表注释也要进 __table_args__ —— 否则 Alembic autogenerate 生成的
+    # `op.create_table(...)` **不带 comment**，用迁移建出来的库会丢掉 38 张表的
+    # `COMMENT='...'`（表注释是 information_schema 可见的元数据，不是文档里的装饰）。
+    # 位置要求：kwargs dict 必须是 __table_args__ 的**最后一个元素**。
+    table_kwargs = f'        {{"comment": {t.comment!r}}},' if t.comment else None
+
     if body:
         lines.append("")
         lines.extend(body)
-    if constraints:
-        lines.extend(["", "    __table_args__ = (", *constraints, "    )"])
+    if constraints or table_kwargs:
+        lines.extend(["", "    __table_args__ = ("])
+        lines.extend(constraints)
+        if table_kwargs:
+            lines.append(table_kwargs)
+        lines.append("    )")
     if t.checks:
         lines.append("")
         lines.append(f"    # DDL 侧 CHECK 约束（Alembic 已建）：{'; '.join(t.checks)}")
@@ -372,7 +396,12 @@ def render_all() -> dict[str, str]:
 def write(rendered: dict[str, str]) -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for fname, text in rendered.items():
-        (OUT_DIR / fname).write_text(text, encoding="utf-8")
+        # newline="\n" 是**必须**的：Windows 上 `write_text` 会把 `\n` 落成 `\r\n`，
+        # 与 `.gitattributes` 的 `eol=lf` 口径冲突 —— 表现为每次跑完生成器，
+        # `mixed-line-ending` 钩子立刻红，且 `git diff` 把改动放大成整文件重写。
+        # 而 `--check` **看不见**这个问题：它用 `read_text()` 比较，通用换行会把
+        # `\r\n` 归一成 `\n`，于是工作区是 CRLF 也能"校验通过"。
+        (OUT_DIR / fname).write_text(text, encoding="utf-8", newline="\n")
         print(f"  ✓ 已写入 app/models/{fname}")
     return 0
 

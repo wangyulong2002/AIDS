@@ -105,7 +105,9 @@ def write(expected: str) -> int:
     for name in TARGETS:
         target = ROOT / name / "requirements.txt"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(expected, encoding="utf-8")
+        # newline="\n" 必须保留：Windows 上 write_text 默认落 CRLF，与
+        # .gitattributes 的 eol=lf 冲突，每次生成都会让 mixed-line-ending 钩子变红。
+        target.write_text(expected, encoding="utf-8", newline="\n")
         print(f"  ✓ 已写入 {target.relative_to(ROOT)}")
     return 0
 
