@@ -49,6 +49,12 @@ docs/_P0修复产物/_backup_*/
 # 故此处只忽略 memory/，而不是整个 .workbuddy/。
 .workbuddy/memory/
 
+# 检测/审计报告：由会话生成的过程性产物，会随每次核查追加；
+# 且结论绑定"生成时的代码快照"，工作区一变即失效，不具备长期有效性。
+# 与 memory/ 同理 —— 入库只会让每次核查都产生一个待提交的变更。
+# （.workbuddy/HANDOFF.md 仍**有意保留入库**，故不整体忽略 .workbuddy/。）
+.workbuddy/reports/
+
 # ---- AI 工作目录（CodeBuddy）----
 # .codebuddy/skills/ 是从 mattpocock/skills 下载后做本地适配得到的技能库，
 # 属于开发者个人环境配置而非项目代码；不同开发者的技能集合与版本可能不同，
