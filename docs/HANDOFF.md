@@ -14,7 +14,7 @@
 | 阶段 | **T1 完成（14/14）→ 可进 T2** |
 | 已勾选任务 | DOC-01~03、DEP-01~04、**BE-00~BE-06**、**MOCK-01~03**、**AI-01**、**FE-01~02**、**BE-37**（行尾口径统一） |
 | **下一个任务** | **T2 起**：从 `BE-07`（注册 / 登录）或 `AI-02`（Ark 客户端）挑一条；**开工前先跑 `scripts/task_runner.py card <编号>`**。范围与协作口径见 `docs/TASKS.md §范围与协作口径` |
-| 测试基线 | **全绿**：全量 `830 passed / 11 skipped`（2026-09-24 实测）。11 个 skip = 5 个需 MySQL + 6 个需 Redis —— **本机 AIDS 中间件容器未启动**（`docker ps` 只有一个无关的 `campus-mysql`），这是**预期态、不是失败**；要跑带库/带 Redis 的用例先执行 `cd deploy && docker compose --profile minimal up -d`（或 `--profile search` / `all`） |
+| 测试基线 | **全绿**：全量 `845 passed / 11 skipped`（2026-09-24 修复后复测；该值随用例增加而增长，T1 收官时为 835）。11 个 skip = 5 个需 MySQL + 6 个需 Redis —— **本机 AIDS 中间件容器未启动**（`docker ps` 只有一个无关的 `campus-mysql`），这是**预期态、不是失败**；要跑带库/带 Redis 的用例先执行 `cd deploy && docker compose --profile minimal up -d`（或 `--profile search` / `all`） |
 | 门禁 | `scripts/task_runner.py verify` **10/10 PASS**（四项 `--check` + `ruff format/check` + C2/C4 扫描器 + `pyright` 0 errors + 全量测试）；文档一致性 **34 项 PASS** |
 | 镜像 | 三个**服务**镜像已端到端验证：build 成功 + 容器起得来 + `/health` 返回 `code=0`（见 §4.1）。**前端镜像未端到端构建**：两个前端工程 `npm run build` 已通过，但 `deploy/app/frontend.Dockerfile` 的 `docker build` 在本机没跑过（见 §4.7 遗留） |
 | 仓库规模 | **205** 个受跟踪文件（T1 全部改动已提交，工作区干净）；服务包 3 个（backend / ai / mock）+ 前端工程 2 个（aids-mall / aids-admin） |
@@ -243,7 +243,7 @@ sed 's/`aids_shop`/`aids_shop_test`/g' docs/sql/schema.sql \
 |---|---|
 | 全量测试（无 DB） | `603 passed / 6 skipped` |
 | 全量测试（带 `DATABASE_URL` 指向 `aids_shop_test`） | `608 passed / 1 skipped` |
-| 文档一致性门禁 | `PASS 35 项` |
+| 文档一致性门禁 | `PASS 34 项` |
 | 三个生成器 `--check` | 全绿（清单 / 快照 / ORM） |
 | `ruff format --check` + `ruff check`（`app tests aids-* scripts`） | 全绿 |
 | `pyright` | `0 errors, 0 warnings` |
@@ -301,7 +301,7 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 1. **越权防线现在的完整链路**：`get_current_user`（JWT → userId）→ `OwnedRepository`（SQL 注入 `WHERE user_id=?`）→ `require()`（查不到 = 10005/403）。业务代码**不允许**出现第三种取 userId 的方式，也**不允许**绕过 `scoped()` 手写查询（S4 扫描器扫全部服务包，code review 把关）。
 2. **新发现并登记的集成缺口**（非 BE-04 范围，见 §6）：nginx `location /api/` 无 rewrite，而后端路由挂在 `/user`、`/auth` 等无 `/api` 前缀下 → 经网关访问会 404。
 
-**验证**：`task_runner verify` 8/8 PASS；pytest `647/5`（无 DB）、`652/0`（带库，原 IDOR skip 已消除）；pyright 0 errors。
+**验证**：`task_runner verify` 8/8 PASS（当轮的门禁步骤数；2026-09-24 补入 C2/C4 扫描器后为 **10 项**）；pytest `647/5`（无 DB）、`652/0`（带库，原 IDOR skip 已消除）；pyright 0 errors。
 
 ---
 
@@ -324,7 +324,7 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 1. 投递循环与配置失效订阅的 **lifespan 接线**留到 T3 —— 交易链路起才有消息可投；
 2. `app/core/refresh_store.py`（BE-03）暂保留自持客户端，并入通用单例列为小任务。
 
-**验证**：`task_runner verify` 8/8 PASS；pytest `705/5`（无 DB）、`710/0`（带库）；pyright 0 errors。
+**验证**：`task_runner verify` 8/8 PASS（当轮的门禁步骤数；2026-09-24 补入 C2/C4 扫描器后为 **10 项**）；pytest `705/5`（无 DB）、`710/0`（带库）；pyright 0 errors。
 
 ---
 
@@ -340,7 +340,7 @@ C12（三服务骨架 + 工具链登记）、CI `images` job、CI smoke 真拉�
 JWT 解出后传入，PRD §9.3「禁止从对话内容中提取」），不是凭据——信任边界是服务间鉴权。
 用户 JWT（`app/core/security.py`）与服务间鉴权（`app/core/service_auth.py`）**两套正交，不得混用**。
 
-**验证**：`task_runner verify` 8/8 PASS；pytest `722/5`（无 DB）、`727/0`（带库）；pyright 0 errors。
+**验证**：`task_runner verify` 8/8 PASS（当轮的门禁步骤数；2026-09-24 补入 C2/C4 扫描器后为 **10 项**）；pytest `722/5`（无 DB）、`727/0`（带库）；pyright 0 errors。
 
 ---
 
@@ -400,7 +400,7 @@ JWT 解出后传入，PRD §9.3「禁止从对话内容中提取」），不是�
 | 项 | 结果 |
 |---|---|
 | `scripts/task_runner.py verify` | **10/10 PASS** |
-| 全量测试（无 DB） | `830 passed / 11 skipped` |
+| 全量测试（无 DB） | `835 passed / 11 skipped` |
 | 文档一致性门禁 | `PASS 34 项` |
 | 三个生成器 `--check` | 全绿（清单 / 快照 / ORM） |
 | `ruff format --check` + `ruff check`（`app tests aids-* scripts`） | 全绿 |
@@ -519,6 +519,75 @@ CRLF 压成 LF，与库内 blob 不一致（"改一行" = "整文件重写"）�
 
 ---
 
+## 4.8 ✅ 本轮（2026-09-24 第二轮）：第三方核查发现的问题修复
+
+一次独立的「T0/T1 完成情况核查」（报告落在 `.workbuddy/reports/`，**不入库**）暴露出
+**3 个真实 bug** 与若干文档口径错误。逐条修复如下。
+
+### ① 三个真实 bug（都不是文档问题，是会算错的代码）
+
+| # | 位置 | 症状 | 修法 |
+|---|------|------|------|
+| 1 | `scripts/gen_orm_models.py::_render_column` | **字符串默认值丢掉 SQL 单引号**：DDL 的 `DEFAULT 'md'` 被渲染成 `text('md')` → 生成 SQL 是 `DEFAULT md`；空串更糟，直接是悬空的 `DEFAULT `。受影响的列：`ai_kb_document.file_type`、`sys_config.description`。实测报 `pymysql 1064 ... near 'md, ...'` | 把**整个 SQL 字面量（含引号）**交给 repr：`'md'` → `text("'md'")`。**为什么长期潜伏**：ORM 只用于查询（建表一律走 `docs/sql`），且 `alembic/env.py` 刻意关掉了 `server_default` 比对 —— 这条错误直到「用迁移从零建库」才第一次被触发 |
+| 2 | `scripts/gen_orm_models.py::write`、`gen_requirements.py`、`gen_constraints.py` | **生成器写盘落 CRLF**（Windows 上 `write_text` 默认行为），与 `.gitattributes` 的 `eol=lf` 冲突 —— 每跑一次生成器，`mixed-line-ending` 钩子就红一次，`git diff` 把改动放大成整文件重写。**`--check` 看不见**：它用 `read_text()` 比较，通用换行会把 `\r\n` 归一成 `\n` | 三处写盘统一加 `newline="\n"`。这正是 BE-37 想根治的那类顽疾的**上游源头之一** |
+| 3 | `app/orm/mixins.py`：`PKMixin` / `TimestampMixin` | **从模型生成的 DDL 与 `schema.sql` 不一致**：① `id` 被 SQLAlchemy 默认加上 `AUTO_INCREMENT`（DDL 没有，本项目是雪花 ID）；② `update_time` **掉了 `ON UPDATE CURRENT_TIMESTAMP`**（`server_onupdate` 不会被渲染进 MySQL DDL，必须写进 `server_default` 的文本里）。两者只在下游「用模型生成 DDL」时暴露 | `autoincrement=False`；`server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")`。同时去掉 `PKMixin` 的 `comment="雪花ID"` —— DDL 侧 38 张表只有少数给 `id` 写了注释，Mixin 是统一的，写死会让 35 张表多出 COMMENT |
+
+### ② 模板与排除清单
+
+- `aids-backend/alembic/script.py.mako`：`Revises: ${down_revision | comma,n}` 在无父修订时
+  会渲染出**行尾空格**，被 ruff 的 `W291`（以及 pre-commit 的 `trailing-whitespace`）判红。
+  改为渲染 `(base)`（Alembic 自己的惯例写法）。
+- `pyproject.toml` 的 `[tool.ruff] exclude` 增加 `aids-backend/alembic/versions`：
+  迁移由 Alembic 渲染器生成，风格与 ruff format 不同，每次 `revision` 都要先格式化再提交，
+  纯噪音（理由与既有的 `app/models` 排除一致）。类型仍由 pyright 覆盖。
+- 新增门禁 `tests/contract/test_alembic_migrations.py`（4 条，`task("BE-02")`）：
+  迁移链**有且只有一个 head**、无环、每个 revision 都真正实现了 `downgrade()`
+  （`pass` 与模板的 `raise NotImplementedError` 都判红）—— 即 S5 的无库下限。
+
+### ③ 文档口径更正（原报告的核心发现）
+
+| 位置 | 原来写的 | 实测 | 处理 |
+|------|----------|------|------|
+| `TASKS.md` T1 出口判据 | `verify 8/8 PASS` | **10/10**（补入 C2/C4 扫描器后由 8 增至 10） | 已回填，并附更正说明 |
+| `TASKS.md` / `HANDOFF.md` | 全量测试 `830 passed` | **835 passed / 11 skipped**（增量 5 恰为 BE-37 的 `test_line_endings.py`） | 已回填 |
+| `TASKS.md` | 文档门禁 `35 项` | **34 项**（移除「总工期」断言后减 1） | 已回填；HANDOFF §4.7 表格里残留的「35」已同步 |
+| `TASKS.md` T1 梯次出口 / 演示形态 | 「用 seed 数据的 admin 账号能登录拿到 JWT」 | **T1 内不可达**：`api/auth.py` 只提供 `/auth/refresh` 与 `/auth/logout`，登录属 T2 的 BE-07 | 已删除该判据并写明口径更正（T1 交付的是 Token 内核，不是登录入口） |
+| `TASKS.md` DEP-02 | 三个 Python 应用镜像「尚未端到端构建验证」 | 本机 `aids/{backend,ai,mock}:dev` 均已构建，实测容器 `healthy`、`USER=aids`、`/health` 返回 `code=0` | 已改为如实描述（并保留初次验证受阻的历史记录） |
+| `TASKS.md` T0 完成情况 | 「13 个部署文件」 | `git ls-files deploy` = **12** | 已改为可复核的口径 |
+| `TASKS.md` DEP-04 | 「Alembic 纳管留待 T1」 | T1 收官时未做 | 本轮**已补做**（见上） |
+
+### ④ 内部服务接口：补上行级权限（BE-06 加固）
+
+原实现里 `order_list` 按 `userId` 过滤，但 `order/{orderNo}`、`{orderNo}/trace`、
+`refund/{refundNo}` **只按业务号查** —— 与 BE-04「资源访问一律 `WHERE id=? AND user_id=?`」
+相悖（orderNo 一旦泄漏即可跨用户读取）。本次给三者都加上必填 `userId` 并入 WHERE，
+查不到返回 **10004**（HTTP 仍 200，符合统一响应约定），**不区分「不存在」与「不是你的」**。
+
+- 契约同步：`docs/API.md` §四 的三个接口已标注「必须带 `userId`」并补了 Query 示例。
+- 测试：`tests/api/test_internal_service.py` 新增 6 条（漏传 → 10001；越权 → 10004；
+  以及一条**编译 SQL 确认 `user_id` 真在 WHERE 里**的静态断言 —— 因为行为用例用的是
+  替身会话，删掉 WHERE 条件它照样会绿，那样门禁就成了装饰）。
+- 教训（值得记）：我第一版用例断言 `422`，实测是 **200 + 10001** ——
+  本项目「业务失败返回 HTTP 200」的约定在参数校验路径上同样成立
+  （`app/core/handlers.py` 只把 401/403/429/500 排除在外）。
+
+### ⑤ CI 补上前端镜像 job（`frontend-images`）
+
+`images` job 原先只覆盖 backend / ai / mock，前端两个镜像从未进 CI。
+新增 `frontend-images`（矩阵 `aids-mall` / `aids-admin`：`docker build --build-arg APP_DIR=...`
+→ 容器 `/healthz` 探针），并并入 `gate` 汇总。为什么必须真 build：
+`frontend.Dockerfile` 是**参数复用**模板，`APP_DIR` 传错在本地 `npm run build` 里照不到。
+
+> **本地未能复验（如实声明）**：本机 `docker build` 在拉 `node:20-alpine` 时被
+> 镜像加速器 `docker.1panel.live` 返回 **403 Forbidden**（与 deploy/README 踩坑 #9/#11
+> 同一类"镜像层拉取受阻"问题），故本 job 的**首次真实验证在 CI**。
+> 本地能验证的部分已验证：两个工程 `npm run build` / `test` / `lint` / `format:check` 全绿。
+
+> 核查报告的检测边界（未复跑 `docker compose up` 全套、未跑 11 条需 MySQL/Redis 的用例等）
+> 一并记在该报告里，它不入库，仅作本轮修复的溯源依据。
+
+---
+
 ## 5. 下一步（精确顺序）
 
 > **原 T1 的 6 步已全部完成**（记录见 §4.7）。以下替换为 **T2 的开局清单**。
@@ -551,7 +620,7 @@ CRLF 压成 LF，与库内 blob 不一致（"改一行" = "整文件重写"）�
 | **S1-c 与 S1-e 的口径** | `assert_required_keys_present`（Ark/字段加密密钥）与 `assert_jwt_keys_configured`（JWT 密钥文件）分列两条断言；若后续把密钥统一收敛到 KeyProvider，应合并并同步本表 |
 | **`.env.example` 与 compose 的中间件口令护栏** | 已登记为「未落地的约束」（`项目设计报告.md §9.10`），触发条件：首次部署到可被外网访问的环境前 |
 | **Nginx TLS** | 同上（443 目前是空映射） |
-| **Alembic 纳管既有 DDL** | `DEP-04` 曾说「留待 T1」；**T1 已收官但此事未做** → 顺延，建议在 T2 首个业务表之前处置。基建已就位（`alembic -c aids-backend/alembic.ini heads` 可跑），`aids-backend/alembic/versions/README.md` 写了正确步骤。**注意**：这是「存量库首次纳管」的一次性手工操作，不适合无监督执行 |
+| **Alembic 纳管既有 DDL** | **已补做（2026-09-24）**：此前 `DEP-04` 写「留待 T1」但 T1 收官时未做。现已在**全新空库**上 `revision --autogenerate` 生成基线迁移 `aids-backend/alembic/versions/20260924_2011_7cdfce83dff8_init_schema.py`（38 表 + 1 CHECK），实测 `upgrade → downgrade → upgrade` 闭环通过，并与 `schema.sql` 建出的库做 `information_schema` 全量比对：索引 146/146、表元信息 38/38、CHECK 1/1 全一致，列定义仅剩 24 行非行为性残差（注释措辞 / `DEFAULT_GENERATED` 标记）。存量库用 `alembic -c aids-backend/alembic.ini stamp head` 纳管（`stamp` 不执行 DDL，安全）。新增门禁 `tests/contract/test_alembic_migrations.py`（单 head + S5 回滚）。细节与使用路径见 `aids-backend/alembic/versions/README.md` |
 | **S5 迁移可回退检查** | `script.py.mako` 已把未实现的 downgrade 生成为 `raise`；完整 CI 检查按计划在 T6 |
 | **前端 / AI 服务** | **三条线均已收官（见 §4.7）**：`aids-ai` 完成 AI-01（结构化日志 + 配置隔离显式化）；`aids-mock` 完成 MOCK-01~03（26/26 测试绿）；前端完成 FE-01/02（两个独立工程 + axios 请求封装）。**遗留**：① 前端两个镜像**未端到端构建**、也**未进 CI `images` 矩阵**（两个工程 `npm run build` 已通过，缺的是 `docker build`）；② 商户侧验签仍为显式降级（T3 的 BE-23 补）；③ Mock 渠道报文仍为 v0-draft |
 | **两个报告文档已删除** | `docs/地基测评报告.md`、`docs/AI自动生成可行性评估报告.md` **由项目所有者有意删除**（确认无用，不恢复），并已纳入 T1 收官提交。正文对它们的路径引用已清理（§0 / §0.1 / §6 改为叙述式；`docs/VERSIONS.md` 未涉及这两份，无需改口径） |

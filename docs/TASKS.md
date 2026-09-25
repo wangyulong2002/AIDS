@@ -21,7 +21,7 @@
 | 梯次 | 主题 | 演示形态（答辩可展示） | 任务数 |
 |------|------|----------------------|--------|
 | **T0** | 设计冻结与地基 ✅ | 数据库可初始化、全中间件一键拉起 | 7 |
-| **T1** | 工程骨架 ✅ | 健康检查通过、登录拿到 Token、Mock 收银台可访问 | 14 |
+| **T1** | 工程骨架 ✅ | 三服务健康检查通过、Token 内核（签发/刷新/吊销 + JWKS）可用、Mock 收银台可访问 | 14 |
 | **T2** | 用户与商品 | 能注册登录、浏览商品、搜索、加购物车 | 18 |
 | **T3** | 交易主链路 ★ | **完整下单→支付→发货→收货闭环** | 15 |
 | **T4** | 售后与后台 | 管理后台可管商品/订单/库存，售后流程闭环 | 20 |
@@ -57,11 +57,11 @@
 | DOC-02 | 设计 | ✅ | 数据库 DDL | 主库 38 表（v1.3 新增 `sys_config` 动态配置表）+ Mock 库 7 表 + 种子数据，已在 MySQL 8.4 实测通过 | — |
 | DOC-03 | 设计 | ✅ | 数据字典 + 接口清单 | 见 [DATA-DICTIONARY.md](DATA-DICTIONARY.md)（38 表，含状态枚举与 PRD 状态机映射、12 条不变量）与 [API.md](API.md)（C端/B端/内部/SSE 全量接口 + 错误码表 + Kafka 消息契约） | DOC-01 |
 | DEP-01 | 部署 | ✅ | 开发环境 Compose | 见 [deploy/docker-compose.yml](../deploy/docker-compose.yml)：9 个服务（最小档 3 + 默认档 3 + search 档 3；v1.3 移除 Nacos 后由 10 降为 9），按需拉起适配不同内存；已改用**构建期 COPY 自建镜像**规避 WSL2 bind mount 故障；**本机已实测拉起并全部 healthy**（v1.3 去 Java 后重测：9 服务全 healthy，MySQL 初始化 38 表、Milvus 向量写入/检索冒烟通过，见 deploy/README 踩坑 #10） | — |
-| DEP-02 | 部署 | ✅ | 应用 Dockerfile | 见 [deploy/app/](../deploy/app/)：backend / ai / frontend（参数复用）/ mock 共 4 个镜像（v1.3 起 backend 与 mock 亦为 FastAPI Python 镜像，`python:3.11-slim` 两阶段构建）；另有 mysql / nginx 两个自建镜像。**backend / ai / mock 以非 root（`USER aids`）运行**，`frontend` 沿用 nginx 官方镜像（master 以 root 启动、worker 进程降权为 `nginx`，属该镜像标准形态）；四个镜像均带 `HEALTHCHECK`，主业务 `/health`:8080、AI `/health`:8000、Mock `/health`:8081、前端 `/healthz`:80。**验证边界（如实声明）**：本项完成的是**静态核对 + mysql/nginx 两个自建镜像的实机构建**；三个 Python 应用镜像因本机 `apt-get` 拉取编译工具链超慢（>1000s 未完成，未改动的 ai.Dockerfile 同样卡住）**尚未端到端构建验证**，随 M1 有真实源码后在 CI 首验，详见 deploy/README 踩坑 #11 | — |
+| DEP-02 | 部署 | ✅ | 应用 Dockerfile | 见 [deploy/app/](../deploy/app/)：backend / ai / frontend（参数复用）/ mock 共 4 个镜像（v1.3 起 backend 与 mock 亦为 FastAPI Python 镜像，`python:3.11-slim` 两阶段构建）；另有 mysql / nginx 两个自建镜像。**backend / ai / mock 以非 root（`USER aids`）运行**，`frontend` 沿用 nginx 官方镜像（master 以 root 启动、worker 进程降权为 `nginx`，属该镜像标准形态）；四个镜像均带 `HEALTHCHECK`，主业务 `/health`:8080、AI `/health`:8000、Mock `/health`:8081、前端 `/healthz`:80。**验证状态（2026-09-24 更新）**：六个镜像均已构建成功；其中 `aids/backend`、`aids/ai`、`aids/mock` 三个应用镜像已**实机拉起并探活通过**（容器 `healthy`、`USER=aids`、`GET /health` 返回 `{"code":0,...}`），CI 的 `images` job 亦对三者做「build + 容器探针」；`frontend` 镜像**尚未端到端构建**（两个前端工程 `npm run build` 已通过，缺的是 `docker build`，见 docs/HANDOFF.md §4.7 遗留）。<br>**历史记录**：初次尝试时本机 `apt-get` 拉取编译工具链超慢（>1000s 未完成）导致未能验证，后已解决，详见 deploy/README 踩坑 #11 | — |
 | DEP-03 | 部署 | ✅ | Nginx 配置 | 见 [deploy/nginx/](../deploy/nginx/)：`/api/ai/**` → AI 服务（**SSE 关闭 `proxy_buffering`、读超时 300s、`gzip off`**）、`/api/**` → FastAPI 主业务、SPA `try_files` 回退、静态资源缓存、traceId 透传、基础安全头。**由 DEP-01 的 compose 挂载，故提前至 T0** | DEP-02 |
-| DEP-04 | 部署 | ✅ | 数据库初始化 | 见 [deploy/mysql/init/00-init-databases.sh](../deploy/mysql/init/00-init-databases.sh)：显式按 `schema → mock_schema → seed` 顺序执行 + 自检输出。**修正了 entrypoint 按字典序执行导致 seed 先于建表的问题**；Alembic 纳管留待 T1（BE-02 之后） | DEP-01, DOC-02 |
+| DEP-04 | 部署 | ✅ | 数据库初始化 | 见 [deploy/mysql/init/00-init-databases.sh](../deploy/mysql/init/00-init-databases.sh)：显式按 `schema → mock_schema → seed` 顺序执行 + 自检输出。**修正了 entrypoint 按字典序执行导致 seed 先于建表的问题**。**Alembic 纳管已补做（2026-09-24，原「留待 T1」已兑现）**：基线迁移 `aids-backend/alembic/versions/20260924_2011_7cdfce83dff8_init_schema.py`（38 表 + 1 CHECK），在空库上实测 `upgrade → downgrade → upgrade` 闭环通过，并与 `schema.sql` 建出的库做过 `information_schema` 全量比对（索引/表元信息/CHECK 全一致，列定义仅 24 行非行为性残差，见该目录 README）；存量库用 `alembic -c aids-backend/alembic.ini stamp head` 纳管（`stamp` 不执行 DDL，安全）；门禁 `tests/contract/test_alembic_migrations.py` 守住单 head 与 S5 回滚 | DEP-01, DOC-02 |
 
-> **T0 完成情况**：7/7 项。产出 4 份文档（数据字典、接口清单、**版本矩阵**、部署说明）+ 13 个部署文件。
+> **T0 完成情况**：7/7 项。产出 4 份文档（数据字典、接口清单、**版本矩阵**、部署说明）+ `deploy/` 目录 **12 个受跟踪文件**（含上面那份部署说明本身；计数口径 = `git ls-files deploy | wc -l`，2026-09-24 复核）。
 >
 > **T0 出口判据达成情况（v1.3 当前事实，2026-09-21 本机重跑，非纸面）**：
 > - `docker compose --profile search up -d` → **9 个服务全部 healthy**（MySQL / Redis / Nginx / Kafka / MinIO / Milvus 三件套 + 一次性 minio-init）；compose 语法通过；`aids/mysql-init`、`aids/nginx` 自建镜像构建成功（`nginx -t` 自检通过）。
@@ -80,7 +80,12 @@
 ## T1 工程骨架
 
 > **为什么排第二**：统一响应、鉴权、ORM 基建是所有业务模块的公共依赖，晚一天定下来，后面每个模块都要返工。
-> **梯次出口**：主业务 `/health` 返回 200；用 seed 数据的 admin 账号能登录拿到 JWT；AI 服务 `/health` 可达；Mock 收银台页面可打开。
+> **梯次出口**：主业务 `/health` 返回 200；**Token 内核可用**（RS256 签发 / Refresh 轮换与吊销 / JWKS 公钥端点，由 BE-03 交付）；AI 服务 `/health` 可达；Mock 收银台页面可打开。
+>
+> **口径更正（2026-09-24，第三方核查）**：本节原写「用 seed 数据的 admin 账号能登录拿到 JWT」——**该判据在 T1 内不成立，已删除**。
+> 根因是它把 **T2 的 BE-07（注册 / 登录）** 的能力写进了 T1 的出口：T1 只交付 Token 内核，`aids-backend/.../api/auth.py`
+> 刻意只提供 `/auth/refresh` 与 `/auth/logout`（其模块 docstring 明写登录属 BE-07），因此**不存在任何可用 seed 账号换 Token 的 HTTP 入口**。
+> 「登录换 Token」的真实归属见 T2 出口。
 
 | 编号 | 板块 | 状态 | 任务 | 内容与验收标准 | 依赖 |
 |------|------|------|------|----------------|------|
@@ -108,9 +113,17 @@
 > （统一响应解包 / JWT 无感刷新单飞并发队列 / 401 重放）。
 >
 > **T1 出口判据达成情况（2026-09-24 实测，非纸面）**：
-> - `scripts/task_runner.py verify` **8/8 PASS**；全量测试 **830 passed / 11 skipped**
+> - `scripts/task_runner.py verify` **10/10 PASS**；全量测试 **845 passed / 11 skipped**
 >   （11 skip = 5 需 MySQL + 6 需 Redis —— 本机中间件未启动时的**预期态**，非失败）。
-> - 文档一致性门禁 **35 项 PASS**；三个生成器 `--check` 全绿；`ruff format` / `ruff check` 全绿；`pyright` **0 errors**。
+>   该数字**随用例增加而增长，不是常量**（T1 收官时为 835，补入本轮 Alembic/内部接口加固用例后为 845），
+>   故刻意未列入 `VERSIONS.md` §二 的跨文档常量表。
+> - 文档一致性门禁 **34 项 PASS**；三个生成器 `--check` 全绿；`ruff format` / `ruff check` 全绿；`pyright` **0 errors**。
+> - `pre-commit run --all-files` **EXIT=0**（19 个 hook 全绿，且不弄脏工作区）。
+>
+> > **数字更正（2026-09-24，第三方核查）**：本节此前写着「verify **8/8** PASS」「**830** passed」「文档门禁 **35 项**」，
+> > 三个数字在 BE-37 落地后均已漂移 —— `verify` 的步骤在补入 C2/C4 扫描器后由 8 项增至 **10 项**；
+> > 测试总数增至 **835**（增量 5 恰为 BE-37 新增的 `tests/contract/test_line_endings.py`）；
+> > 文档门禁在移除「总工期」断言后由 35 项降为 **34 项**。已按实测回填，并以 `pre-commit run --all-files` 的结果替代原先只写结论的写法。
 > - 两个前端工程：`npm run build`（vue-tsc + vite）通过；`npm test`（vitest）**5/5** 通过；`npm run lint` / `format:check` 通过。
 > - 新增门禁 **C13**（`tests/contract/test_frontend_scaffold.py`：双工程独立 / 依赖与配置齐全 / 请求封装与单飞刷新不变量 /
 >   构建产物已忽略）与 **CI `frontend` job**（矩阵 install → lint → format:check → test → build），已并入 `gate` 汇总。
