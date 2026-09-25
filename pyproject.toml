@@ -95,7 +95,13 @@ target-version = "py311"
 # 不参与 ruff 格式化与检查：格式化会改写文件，而 `gen_orm_models.py --check`
 # 正是靠"文件内容 == 生成结果"来保证模型与 DDL 不漂移 —— 两者必须二选一。
 # 类型正确性仍由 pyright 把关（pyright 的 include 含 app/）。
-exclude = ["deploy", "docs", ".trae", "app/models"]
+#
+# aids-backend/alembic/versions/ 同理：文件由 `alembic revision --autogenerate` 生成，
+# 其缩进/引号风格由 Alembic 自己的渲染器决定，ruff format 每次都会要求重排 ——
+# 于是"每生成一条迁移就要先格式化再提交"，纯噪音。经 pre-commit 时还得靠 --force-exclude，
+# 因为 ruff-format 钩子的 entry 就是 `ruff format --force-exclude`。
+# 类型仍由 pyright 覆盖；模板层的问题（如生成物带行尾空格）在 script.py.mako 里根治。
+exclude = ["deploy", "docs", ".trae", "app/models", "aids-backend/alembic/versions"]
 
 [tool.ruff.lint]
 select = [

@@ -1,7 +1,15 @@
-"""${message}
+<%
+# 让 `Revises:` 在「无父修订」时也有内容。
+# 为什么要这层处理：直接用 `${down_revision | comma,n}` 时，down_revision 为 None
+# 会渲染成 `Revises: ` —— **带一个行尾空格**，被 ruff 的 W291 判红（2026-09-24 实测，
+# 首次 autogenerate 就撞上）。`(base)` 同时也是 Alembic 自己的惯例写法。
+_parents = down_revision
+if isinstance(_parents, (list, tuple)):
+    _parents = ", ".join(_parents)
+%>"""${message}
 
 Revision ID: ${up_revision}
-Revises: ${down_revision | comma,n}
+Revises: ${_parents or "(base)"}
 Create Date: ${create_date}
 
 =====================================================================
